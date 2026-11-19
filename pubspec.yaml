@@ -1,0 +1,37 @@
+name: holdfast
+description: "Offline survival map: supplies, hazards and off-grid networking."
+publish_to: 'none'
+
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  material_ui: ^1.1.0
+  cupertino_icons: ^1.0.8
+
+  # Maps: pure-Dart rendering, so one code path for mobile, desktop and web.
+  flutter_map: ^8.3.2
+  latlong2: ^0.9.1
+  vector_map_tiles: ^9.0.0-beta.9
+  vector_map_tiles_pmtiles: ^1.5.2
+  vector_tile_renderer: ^6.1.0
+
+  # App plumbing.
+  flutter_animate: ^4.5.2
+  http: ^1.6.0
+  path_provider: ^2.1.6
+  provider: ^6.1.5+1
+  shared_preferences: ^2.5.6
+  uuid: ^4.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
