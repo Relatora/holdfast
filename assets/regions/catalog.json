@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "note": "Bounding boxes are [west, south, east, north]. approxBytes are planning estimates; the real size comes from the region server's index.json once a file is hosted.",
+  "regions": [
+    { "id": "world", "name": "Whole world", "level": "world", "bbox": [-180, -85, 180, 85], "approxBytes": 139600000000, "remoteUrl": "https://build.protomaps.com/20261118.pmtiles" },
+
+    { "id": "north-america", "name": "North America", "level": "continent", "bbox": [-168, 7, -52, 72], "approxBytes": 32000000000 },
+    { "id": "south-america", "name": "South America", "level": "continent", "bbox": [-82, -56, -34, 13], "approxBytes": 9000000000 },
+    { "id": "europe", "name": "Europe", "level": "continent", "bbox": [-25, 34, 45, 72], "approxBytes": 46000000000 },
+    { "id": "africa", "name": "Africa", "level": "continent", "bbox": [-18, -35, 52, 38], "approxBytes": 11000000000 },
+    { "id": "asia", "name": "Asia", "level": "continent", "bbox": [45, -11, 180, 78], "approxBytes": 31000000000 },
+    { "id": "oceania", "name": "Oceania", "level": "continent", "bbox": [110, -48, 180, 0], "approxBytes": 3500000000 },
+
+    { "id": "canada", "name": "Canada", "level": "country", "parent": "north-america", "bbox": [-141, 41.6, -52.6, 72], "approxBytes": 12000000000 },
+    { "id": "united-states", "name": "United States", "level": "country", "parent": "north-america", "bbox": [-125, 24.4, -66.9, 49.4], "approxBytes": 24000000000 },
+    { "id": "mexico", "name": "Mexico", "level": "country", "parent": "north-america", "bbox": [-118.4, 14.5, -86.7, 32.7], "approxBytes": 2600000000 },
+
+    { "id": "ontario", "name": "Ontario", "level": "province", "parent": "canada", "bbox": [-95.2, 41.6, -74.3, 56.9], "approxBytes": 2100000000 },
+    { "id": "quebec", "name": "Quebec", "level": "province", "parent": "canada", "bbox": [-79.8, 45, -57.1, 62.6], "approxBytes": 1800000000 },
+    { "id": "british-columbia", "name": "British Columbia", "level": "province", "parent": "canada", "bbox": [-139.1, 48.2, -114, 60], "approxBytes": 1500000000 },
+    { "id": "alberta", "name": "Alberta", "level": "province", "parent": "canada", "bbox": [-120, 49, -110, 60], "approxBytes": 900000000 },
+
+    { "id": "ottawa", "name": "Ottawa–Gatineau", "level": "city", "parent": "ontario", "bbox": [-76.36, 45.17, -75.25, 45.62], "approxBytes": 21300000 },
+    { "id": "toronto", "name": "Greater Toronto", "level": "city", "parent": "ontario", "bbox": [-79.9, 43.4, -78.9, 44.05], "approxBytes": 160000000 },
+    { "id": "montreal", "name": "Montréal", "level": "city", "parent": "quebec", "bbox": [-74.1, 45.3, -73.3, 45.8], "approxBytes": 90000000 },
+    { "id": "vancouver", "name": "Metro Vancouver", "level": "city", "parent": "british-columbia", "bbox": [-123.35, 49, -122.4, 49.45], "approxBytes": 80000000 }
+  ]
+}

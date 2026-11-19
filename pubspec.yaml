@@ -35,3 +35,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # The region catalog ships inside the app so the map list renders even
+  # when the region server is unreachable.
+  assets:
+    - assets/regions/catalog.json
+
