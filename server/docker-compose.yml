@@ -1,0 +1,33 @@
+# Production-like local stack: the server backed by PostgreSQL + PostGIS.
+#
+#   docker compose -f server/docker-compose.yml up
+#
+# Without Docker, `go -C server run .` uses the in-memory store instead.
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: holdfast
+      POSTGRES_PASSWORD: holdfast-dev-only
+      POSTGRES_DB: holdfast
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U holdfast"]
+      interval: 2s
+      retries: 20
+
+  server:
+    image: golang:1.26
+    working_dir: /src/server
+    command: go run .
+    environment:
+      DATABASE_URL: postgres://holdfast:holdfast-dev-only@db:5432/holdfast
+      REGIONS_DIR: /src/regions
+    ports: ["8787:8787"]
+    volumes: ["..:/src"]
+    depends_on:
+      db: { condition: service_healthy }
+
+volumes:
+  pgdata:
