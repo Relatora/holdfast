@@ -193,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   /// Animated "fly to": eases position and zoom together and briefly zooms
   /// out mid-flight when the hop is long, like a camera pulling back to show
   /// where it's going.
-  void _flyTo(LatLng target, double zoom) {
+  void _flyTo(LatLng target, double zoom, {Duration duration = const Duration(milliseconds: 1100)}) {
     if (!Motion.enabledNow(context)) {
       _map.move(target, zoom);
       _updateVisiblePois();
@@ -201,7 +201,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
     _flight?.dispose();
     final start = _map.camera;
-    final controller = _flight = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100));
+    final controller = _flight = AnimationController(vsync: this, duration: duration);
     final distanceKm = distanceMeters(start.center.latitude, start.center.longitude, target.latitude, target.longitude) / 1000;
     final pullBack = (math.log(1 + distanceKm) / math.ln10 * 1.2).clamp(0.0, 3.0);
     final curve = CurvedAnimation(parent: controller, curve: Curves.easeInOutCubic);
@@ -215,6 +215,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       })
       ..forward().whenComplete(() => _updateVisiblePois());
   }
+
+  /// The on-screen zoom buttons. Pinch and the scroll wheel already zoom,
+  /// but not every setup has them: a laptop trackpad driving an Android
+  /// emulator, a desktop without a wheel, or a gloved hand on a phone.
+  void _zoomBy(double delta) {
+    final camera = _map.camera;
+    // Quick taps add up: while a zoom is still animating, step from where
+    // it is heading rather than from wherever the camera is mid-flight.
+    final zooming = _flight != null && identical(_flight, _zoomFlight) && _flight!.isAnimating;
+    final zoom = ((zooming ? _zoomTarget : camera.zoom)! + delta).clamp(2.0, 19.0);
+    _flyTo(camera.center, zoom, duration: const Duration(milliseconds: 250));
+    _zoomTarget = zoom;
+    _zoomFlight = _flight;
+  }
+
+  /// Where the last zoom-button animation ([_zoomFlight]) is heading.
+  double? _zoomTarget;
+  AnimationController? _zoomFlight;
 
   // ---- Actions ---------------------------------------------------------------
 
@@ -380,6 +398,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   onPressed: _openRegions,
                   child: const Icon(Icons.layers_rounded),
                 ),
+                const SizedBox(height: 10),
+                ZoomButtons(onZoomIn: () => _zoomBy(1), onZoomOut: () => _zoomBy(-1)),
               ],
             ),
           ),

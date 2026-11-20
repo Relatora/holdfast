@@ -256,6 +256,33 @@ class CategoryChips extends StatelessWidget {
   }
 }
 
+/// Zoom in and out, stacked in one pill so they read as a pair.
+class ZoomButtons extends StatelessWidget {
+  const ZoomButtons({super.key, required this.onZoomIn, required this.onZoomOut});
+
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomOut;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHigh,
+      elevation: 3,
+      shape: const StadiumBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(tooltip: 'Zoom in', onPressed: onZoomIn, icon: const Icon(Icons.add_rounded)),
+          SizedBox(width: 24, child: Divider(height: 1, color: scheme.outlineVariant)),
+          IconButton(tooltip: 'Zoom out', onPressed: onZoomOut, icon: const Icon(Icons.remove_rounded)),
+        ],
+      ),
+    );
+  }
+}
+
 /// A rounded, translucent capsule used for the status lines.
 class _Capsule extends StatelessWidget {
   const _Capsule({super.key, required this.icon, required this.text, this.color, this.onTap});

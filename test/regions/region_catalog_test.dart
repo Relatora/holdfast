@@ -30,6 +30,29 @@ void main() {
     }
   });
 
+  test('every region has a size to show before download', () {
+    // New entries start at 0 until tool/measure_regions.py fills them in.
+    for (final r in regions) {
+      expect(r.approxBytes, greaterThan(0), reason: '${r.id}: run tool/measure_regions.py');
+    }
+  });
+
+  test('provinces and states are grouped by country, then alphabetical', () {
+    final provinces = regions.where((r) => r.level == RegionLevel.province).toList();
+    // Grouped: once a country's run ends, it never reappears.
+    final seen = <String?>[];
+    for (final p in provinces) {
+      if (seen.isEmpty || seen.last != p.parentId) {
+        expect(seen, isNot(contains(p.parentId)), reason: '${p.id} is out of its group');
+        seen.add(p.parentId);
+      }
+    }
+    for (final country in seen) {
+      final names = [for (final p in provinces) if (p.parentId == country) p.name];
+      expect(names, [...names]..sort(), reason: '$country is not alphabetical');
+    }
+  });
+
   test('cities sit inside their province', () {
     final byId = {for (final r in regions) r.id: r};
     for (final city in regions.where((r) => r.level == RegionLevel.city)) {
