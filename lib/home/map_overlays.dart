@@ -349,18 +349,22 @@ class SyncStatusChip extends StatelessWidget {
 }
 
 class RegionStatusChip extends StatelessWidget {
-  const RegionStatusChip({super.key, required this.region, required this.offline});
+  const RegionStatusChip({super.key, required this.region, required this.offline, this.onTap});
 
   final Region? region;
   final bool offline;
 
+  /// Opens the "My maps" switcher.
+  final VoidCallback? onTap;
+
   @override
   Widget build(BuildContext context) {
     final r = region;
-    if (r == null) return const _Capsule(icon: Icons.map_outlined, text: 'No map yet');
+    if (r == null) return _Capsule(icon: Icons.map_outlined, text: 'No map yet', onTap: onTap);
     return _Capsule(
       icon: offline ? Icons.offline_pin_rounded : Icons.public_rounded,
       text: offline ? 'Offline map: ${r.name}' : 'Streaming: ${r.name}',
+      onTap: onTap,
     );
   }
 }

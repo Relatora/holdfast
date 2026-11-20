@@ -22,6 +22,7 @@ import '../pois/poi.dart';
 import '../pois/poi_index.dart';
 import '../pois/poi_sheets.dart';
 import '../regions/region.dart';
+import '../regions/my_maps_sheet.dart';
 import '../regions/region_store.dart';
 import '../regions/regions_screen.dart';
 import '../routing/directions.dart';
@@ -157,7 +158,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (result == OnboardingResult.chooseMaps && mounted) _openRegions();
   }
 
-  void _openRegions() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RegionsScreen()));
+  /// Opens the Maps screen. Tapping a downloaded map there returns it, and
+  /// the map flies to it.
+  Future<void> _openRegions() async {
+    final chosen = await Navigator.of(context).push<Region>(MaterialPageRoute(builder: (_) => const RegionsScreen()));
+    if (chosen != null && mounted) _goToRegion(chosen);
+  }
+
+  /// "My maps": the quick switcher behind the status chip.
+  Future<void> _openMyMaps() async {
+    switch (await showMyMaps(context)) {
+      case GoToMap(:final region):
+        _goToRegion(region);
+      case ManageMaps():
+        _openRegions();
+      case null:
+        break;
+    }
+  }
+
+  /// Shows [region]: switching to it loads it and flies there
+  /// ([_onRegionsChanged]); if it is already the active map, just fly back.
+  Future<void> _goToRegion(Region region) async {
+    if (_regions.activeRegion?.id != region.id) {
+      await _regions.activate(region);
+    } else {
+      _flyTo(region.center, region.fitZoom + 1.5);
+    }
+  }
 
   void _openSettings() => Navigator.of(context).push(
     MaterialPageRoute(
@@ -534,7 +562,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       children: [
                         SyncStatusChip(status: hazardsRepo.syncStatus),
                         const SizedBox(height: 6),
-                        RegionStatusChip(region: active, offline: regions.files.storesOffline),
+                        RegionStatusChip(
+                          region: active,
+                          offline: regions.files.storesOffline,
+                          onTap: _openMyMaps,
+                        ),
                         const SizedBox(height: 6),
                         const AttributionChip(),
                       ],
