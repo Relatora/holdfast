@@ -102,6 +102,10 @@ class Router {
 
   // ---- Public API ----------------------------------------------------------
 
+  /// Whether [point] is close enough to this map's paths to start a route
+  /// from. False for a GPS position outside the downloaded region.
+  bool covers(LatLng point) => _nearestVertex(point, _Profile.walk) != null;
+
   /// Plans a route. Tries to keep out of every [avoid] area; if that leaves
   /// no route at all, returns the best route anyway, flagged
   /// [RoutePlan.throughHazard], because a warned route beats none.

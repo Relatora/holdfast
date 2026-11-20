@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:holdfast/hazards/hazard.dart';
 import 'package:holdfast/routing/directions.dart';
 import 'package:holdfast/routing/router.dart';
+import 'package:latlong2/latlong.dart';
 
 import 'router_test.dart' show ne, se, sw, town;
 
@@ -30,6 +31,19 @@ void main() {
     expect(d.error, contains('no train stations'));
     d.setMode(TravelMode.car);
     expect(d.plan?.mode, TravelMode.car);
+  });
+
+  test('a location outside the map starts from the map view, and says so', () async {
+    final d = Directions(
+      loadPack: () async => town().build(),
+      mapCenter: () => sw,
+      locate: () async => const LatLng(37.42, -122.08), // the emulator's default: California
+    );
+    await d.open(to: ne, label: 'NE corner', regionId: 'town', avoid: const []);
+    expect(d.fromMyLocation, isFalse);
+    expect(d.origin, sw);
+    expect(d.notice, contains('outside this map'));
+    expect(d.plan, isNotNull);
   });
 
   test('a map without a routing pack says how to get directions', () async {

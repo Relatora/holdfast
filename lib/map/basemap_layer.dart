@@ -43,12 +43,13 @@ class _BasemapLayerState extends State<BasemapLayer> {
   /// region already chosen), the map stays blank until someone pans. One
   /// nudge right after the layer appears usually works, but it can land
   /// before the layer subscribes. So: pan one pixel and back every 300 ms
-  /// until the provider has received its first tile request, at most 20
-  /// times. Each nudge is invisible, and the loop stops as soon as tiles
-  /// flow.
+  /// until the provider has received its first tile request, for up to 30
+  /// seconds (a debug build cold-starting on an emulator was still not
+  /// subscribed after the 6 s this used to allow). Each nudge is invisible,
+  /// and the loop stops as soon as tiles flow.
   void _kickUntilFirstRequest(ResilientTileProvider provider, {int attempt = 0}) {
     Future<void>.delayed(Duration(milliseconds: attempt == 0 ? 0 : 300), () {
-      if (!mounted || provider.requestCount > 0 || attempt >= 20) return;
+      if (!mounted || provider.requestCount > 0 || attempt >= 100) return;
       final controller = MapController.maybeOf(context);
       final camera = MapCamera.maybeOf(context);
       if (controller != null && camera != null) {

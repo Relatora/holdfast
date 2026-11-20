@@ -93,6 +93,18 @@ class DirectionsPanel extends StatelessWidget {
               ),
             ),
             if (d.busy) const Padding(padding: EdgeInsets.all(16), child: LinearProgressIndicator()),
+            if (d.notice != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.location_off_outlined, color: scheme.onSurfaceVariant, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(d.notice!, style: theme.textTheme.bodySmall)),
+                  ],
+                ),
+              ),
             if (d.error != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),

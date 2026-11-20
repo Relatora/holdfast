@@ -84,6 +84,10 @@ class Directions extends ChangeNotifier {
 
   RoutePlan? plan;
   String? error;
+
+  /// Something worth knowing that isn't an error, e.g. why the route starts
+  /// from the map view instead of the device's position.
+  String? notice;
   bool busy = false;
 
   List<Avoid> _avoid = const [];
@@ -131,8 +135,17 @@ class Directions extends ChangeNotifier {
     }
 
     _myLocation ??= await locate();
-    fromMyLocation = _myLocation != null;
-    origin = _myLocation ?? _viewCenter ?? mapCenter();
+    notice = null;
+    final here = _myLocation;
+    if (here != null && !_router!.covers(here)) {
+      // A real position, but outside this map: starting there can only
+      // fail, so start from the map view and say why.
+      fromMyLocation = false;
+      notice = 'You are outside this map, so the route starts from the map view.';
+    } else {
+      fromMyLocation = here != null;
+    }
+    origin = fromMyLocation ? here : (_viewCenter ?? mapCenter());
     _replan();
   }
 
@@ -144,10 +157,17 @@ class Directions extends ChangeNotifier {
 
   /// Switches the start between the device's position and the map centre.
   Future<void> useMyLocation(bool value) async {
+    notice = null;
     if (value) {
       _myLocation = await locate();
-      if (_myLocation == null) {
-        error = 'This device isn\'t sharing a location, so the route starts from the middle of the map.';
+      final here = _myLocation;
+      if (here == null) {
+        notice = 'This device isn\'t sharing a location, so the route starts from the map view.';
+        notifyListeners();
+        return;
+      }
+      if (_router != null && !_router!.covers(here)) {
+        notice = 'You are outside this map, so the route starts from the map view.';
         notifyListeners();
         return;
       }
@@ -168,6 +188,7 @@ class Directions extends ChangeNotifier {
     destination = null;
     plan = null;
     error = null;
+    notice = null;
     busy = false;
     notifyListeners();
   }
