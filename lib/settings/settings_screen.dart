@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../hazards/hazard_repository.dart';
 import '../reputation/my_reporting_screen.dart';
+import '../training/training_screen.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_theme_mode.dart';
 import '../theme/theme_toggle_button.dart';
@@ -44,6 +45,13 @@ class SettingsScreen extends StatelessWidget {
             onChanged: (value) => settings.batterySaver = value,
           ),
           const _Header('Hazards'),
+          ListTile(
+            leading: const Icon(Icons.school_rounded),
+            title: const Text('Training'),
+            subtitle: const Text('Practise with pretend emergencies on your own map. Nothing is real or sent.'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TrainingScreen())),
+          ),
           ListTile(
             leading: const Icon(Icons.military_tech_rounded),
             title: const Text('My reporting'),

@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import '../../regions/region_files.dart' show SidePack;
 import '../../regions/region_store.dart';
 import '../../settings/app_settings.dart';
+import '../../training/training_hooks.dart';
 import '../hazard.dart';
 import '../hazard_details.dart';
 import 'nuclear_effects.dart';
@@ -94,6 +95,7 @@ class NuclearEffectsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    TrainingHooks.report(const ViewedNuclearRings());
     final settings = context.watch<AppSettings>();
     final store = context.read<RegionStore>();
     final theme = Theme.of(context);

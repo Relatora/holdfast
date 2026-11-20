@@ -41,11 +41,16 @@ import '../settings/settings_screen.dart';
 import '../theme/app_theme_mode.dart';
 import '../theme/motion.dart';
 import '../theme/theme_toggle_button.dart';
+import '../training/training_hooks.dart';
 import 'map_overlays.dart';
 
 /// The main screen: the offline map with supplies, hazards and controls.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.training = false});
+
+  /// Running inside a training scenario: no welcome cards. Everything else
+  /// is the real screen, fed by a sandbox hazard repository.
+  final bool training;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -99,7 +104,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     // which case no notification is coming; check its current state once.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _onRegionsChanged();
-      _maybeShowOnboarding();
+      if (!widget.training) _maybeShowOnboarding();
     });
   }
 
@@ -320,6 +325,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _focusPoi(Poi poi) {
+    TrainingHooks.report(OpenedPlace(poi.category));
     // Remember the view before flying to the place: it is where a route
     // starts when the device has no location of its own.
     final viewBefore = _map.camera.center;
@@ -379,7 +385,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   /// Hazards currently shown on the map, as areas a route should avoid.
   List<Avoid> _avoidNow() {
-    final showUnverified = context.read<AppSettings>().showUnverifiedHazards;
+    final showUnverified = context.read<AppSettings>().showUnverifiedHazards || _hazardRepo.isSandbox;
     return avoidAreas([
       for (final h in _hazardRepo.hazards)
         if (isVisible(_hazardRepo.assess(h), showUnverified: showUnverified)) h,
@@ -402,6 +408,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final plan = _directions.plan;
     if (plan == null || identical(plan, _shownPlan)) return;
     _shownPlan = plan;
+    TrainingHooks.report(PlannedRoute(plan));
     final points = [for (final leg in plan.legs) ...leg.points];
     if (points.length < 2) return;
     _map.fitCamera(
@@ -462,7 +469,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final shownCategories = settings.hazardCategories;
     final hazards = [
       for (final hazard in hazardsRepo.hazards)
-        if (isVisible(hazardsRepo.assess(hazard), showUnverified: settings.showUnverifiedHazards) &&
+        if (isVisible(hazardsRepo.assess(hazard), showUnverified: settings.showUnverifiedHazards || hazardsRepo.isSandbox) &&
             passesFilter(hazard, shownCategories))
           (hazard: hazard, assessment: hazardsRepo.assess(hazard)),
     ];

@@ -8,6 +8,7 @@ import '../reputation/achievement_badge.dart';
 import '../reputation/achievements.dart';
 import '../settings/app_settings.dart';
 import '../theme/motion.dart';
+import '../training/training_hooks.dart';
 import 'effects/nuclear_view.dart';
 import 'effects/spread.dart';
 import 'hazard.dart';
@@ -135,9 +136,14 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
         );
     await HapticFeedback.mediumImpact();
     if (!mounted) return;
+    final practice = context.read<HazardRepository>().isSandbox;
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Reported. It will show for everyone once others nearby confirm it.')),
+      SnackBar(
+        content: Text(practice
+            ? 'Practice report added. It stays in this training run.'
+            : 'Reported. It will show for everyone once others nearby confirm it.'),
+      ),
     );
   }
 
@@ -471,6 +477,9 @@ List<Widget> _detailRows(Hazard hazard, ThemeData theme) {
 
 /// Bottom sheet showing a hazard's status, time left and vote buttons.
 Future<void> showHazardDetailsSheet(BuildContext context, String hazardId) {
+  if (context.read<HazardRepository>().byId(hazardId) case final hazard?) {
+    TrainingHooks.report(OpenedHazard(hazard.type));
+  }
   return showModalBottomSheet<void>(
     context: context,
     // Scroll-controlled: a nuclear report's ring legend runs long.
