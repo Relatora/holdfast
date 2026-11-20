@@ -16,6 +16,10 @@ import 'resilient_tile_provider.dart';
 class BasemapLayer extends StatefulWidget {
   const BasemapLayer({super.key, required this.source, required this.mode});
 
+  /// The closest the map can zoom. Shared with `MapOptions.maxZoom` so the
+  /// basemap is drawn at every zoom the camera can reach (see [build]).
+  static const maxMapZoom = 19.0;
+
   /// Path or URL accepted by `PmTilesArchive.from`.
   final String source;
 
@@ -86,8 +90,13 @@ class _BasemapLayerState extends State<BasemapLayer> {
           key: ValueKey('${widget.source}|${widget.mode.name}'),
           theme: basemapStyleFor(widget.mode),
           tileProviders: TileProviders({'protomaps': provider}),
-          // Tiles past the archive's max zoom are scaled up from the last level.
-          maximumZoom: provider.maximumZoom.toDouble(),
+          // The layer renders in raster mode (the package default), where
+          // this is the highest zoom the layer is *displayed* at, not the
+          // archive's top zoom. Passing the archive's 14 made the basemap
+          // vanish past street level (#45). Past z14 the package over-zooms:
+          // raster tiles are still drawn from the z14 vectors, so streets
+          // stay sharp all the way in.
+          maximumZoom: BasemapLayer.maxMapZoom,
           // Rendered tiles are cheap to rebuild from a local archive, and a
           // style change must never show stale colours from the cache.
           fileCacheTtl: Duration.zero,

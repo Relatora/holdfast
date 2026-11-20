@@ -399,7 +399,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               initialCenter: const LatLng(45.42, -75.69),
               initialZoom: 3,
               minZoom: 2,
-              maxZoom: 19,
+              maxZoom: BasemapLayer.maxMapZoom,
               backgroundColor: scheme.surface,
               interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
               onPositionChanged: (_, hasGesture) {
