@@ -47,6 +47,9 @@ class PlaceSearchBar extends StatelessWidget {
       suggestionsBuilder: (context, controller) {
         void select(Poi poi) {
           controller.closeView(poi.title);
+          // Closing the search view leaves the bar focused, and the keyboard
+          // would cover the place sheet and the directions panel.
+          FocusManager.instance.primaryFocus?.unfocus();
           onSelected(poi);
         }
 

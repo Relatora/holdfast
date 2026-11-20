@@ -15,8 +15,9 @@ Built with **Flutter** (one codebase for Android, iOS, Windows, macOS, Linux and
 
 | | |
 |---|---|
-| **Offline maps, any size** | Download a city (Ottawa is 21 MB), a province, a country, a continent or the entire planet. Downloads resume after interruption. |
-| **Supplies by category** | Big-box stores, groceries, hardware, outdoor, medical, drinking water, fuel and shelters: 3,483 places for Ottawa alone, all searchable offline. |
+| **Offline maps, any size** | Download a city (Ottawa is 21 MB), any of 65 provinces and states, a country, a continent or the entire planet. Search the list; sizes are measured, not guessed. A region the server doesn't host yet is built on request. Downloads resume after interruption. |
+| **Supplies by category** | Big-box stores, groceries, hardware, outdoor, medical, drinking water, fuel, shelters and airports: 3,508 places for Ottawa alone, all searchable offline. Star places and save searches. |
+| **Offline directions** | Walk, bike, drive or take the train, computed on the device from the downloaded road and rail network, with step-by-step street names. Routes keep clear of reported hazards. |
 | **Nearest supplies** | A radar sweep finds the closest place of each kind. |
 | **Community hazards** | Long-press to report a fire, flood, blocked road or gas leak. A report is shown to everyone once people nearby confirm it, and expires when nobody does. |
 | **Three palettes + system** | Light for sunlight, dark for dusk, and **night vision**: pure red on black, which preserves dark-adapted eyes. Switching plays a circular reveal. |
@@ -45,6 +46,7 @@ Design decisions worth reading:
 - **Hazards sync as facts, not state.** Every report and vote is an immutable event with a UUID. Folding the log is order-independent and idempotent, so events can arrive late, twice or out of order, over the internet today and over mesh radio later. See [`hazard_events.dart`](lib/hazards/hazard_events.dart).
 - **The verification rules run on the client.** The server is a relay; it never decides what is "verified". Two phones with no server in reach still reach the same answer from the same facts. See [`hazard_engine.dart`](lib/hazards/hazard_engine.dart) and the discussion in #2.
 - **One rendering path for every platform.** `maplibre_gl` has no desktop support, so the map is pure Dart (`flutter_map`) reading PMTiles from a local file or over HTTP range requests (#5).
+- **Directions run on the device.** `tool/build_routing.py` compiles a city's roads, paths and rail lines into a varint-packed graph (Ottawa: 400,000 edges in 7.4 MB), with per-mode access, one-way rules and speeds. The app runs A* over it with hazard areas blocked; a train trip is walk → rail → walk, with estimated times because no timetables exist offline. See [`router.dart`](lib/routing/router.dart).
 - **Night vision is generated, not hand-drawn.** The dark map style is walked recursively and every colour is mapped to a red of the same luminance. A test asserts that no blue light survives. See [`basemap_style.dart`](lib/map/basemap_style.dart).
 
 ## Run it locally
@@ -52,9 +54,11 @@ Design decisions worth reading:
 Requirements: Flutter 3.50+, Go 1.26+, Python 3.10+.
 
 ```sh
-# 1. Fetch a region: basemap (~21 MB) and supply locations for Ottawa
+# 1. Fetch a region: basemap (~21 MB), supply locations and routing network
+#    (or skip this: the server builds any region on demand)
 python tool/fetch_region.py ottawa
 python tool/import_pois.py ottawa
+python tool/build_routing.py ottawa
 
 # 2. Start the server (in-memory store; serves regions/ with Range support)
 go -C server run .
@@ -70,7 +74,7 @@ For a production-like backend with PostgreSQL + PostGIS: `docker compose -f serv
 ## Tests
 
 ```sh
-flutter analyze && flutter test   # 52 tests: rules, sync fold, search, styles, onboarding
+flutter analyze && flutter test   # rules, sync fold, search, routing, styles, onboarding
 go -C server vet ./... && go -C server test ./...
 ```
 

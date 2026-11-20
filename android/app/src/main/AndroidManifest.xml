@@ -1,6 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Map, supply and routing downloads, and hazard sync. Debug builds
+         get this permission automatically; release builds need it here. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Routes start from where you are. GPS works with no network at all. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <application
-        android:label="holdfast"
+        android:label="Holdfast"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -24,6 +24,9 @@ import '../pois/poi_sheets.dart';
 import '../regions/region.dart';
 import '../regions/region_store.dart';
 import '../regions/regions_screen.dart';
+import '../routing/directions.dart';
+import '../routing/directions_panel.dart';
+import '../routing/router.dart';
 import '../settings/app_settings.dart';
 import '../settings/settings_screen.dart';
 import '../theme/app_theme_mode.dart';
@@ -65,10 +68,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   static const _allPinsZoom = 13.5;
   static const _maxPins = 250;
 
+  /// Directions: the panel's state and the route on the map.
+  late final Directions _directions = Directions(
+    loadPack: () async {
+      final region = _regions.activeRegion;
+      return region == null ? null : _regions.routingPack(region);
+    },
+    mapCenter: () => _map.camera.center,
+  )..addListener(_onDirectionsChanged);
+  RoutePlan? _shownPlan;
+  late final HazardRepository _hazardRepo = context.read<HazardRepository>();
+
   @override
   void initState() {
     super.initState();
     _regions.addListener(_onRegionsChanged);
+    // New or expired hazard reports change what a route should avoid.
+    _hazardRepo.addListener(_onHazardsChanged);
     // The store may have finished loading before this screen subscribed, in
     // which case no notification is coming; check its current state once.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -80,6 +96,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void dispose() {
     _regions.removeListener(_onRegionsChanged);
+    _hazardRepo.removeListener(_onHazardsChanged);
+    _directions.dispose();
     _dropTimer?.cancel();
     _viewportDebounce?.cancel();
     _flight?.dispose();
@@ -142,15 +160,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _openRegions() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RegionsScreen()));
 
   void _openSettings() => Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => SettingsScreen(
-            mapCenter: () => _map.camera.center,
-            onShowWelcome: () => showOnboarding(context).then((result) {
-              if (result == OnboardingResult.chooseMaps && mounted) _openRegions();
-            }),
-          ),
-        ),
-      );
+    MaterialPageRoute(
+      builder: (_) => SettingsScreen(
+        mapCenter: () => _map.camera.center,
+        onShowWelcome: () => showOnboarding(context).then((result) {
+          if (result == OnboardingResult.chooseMaps && mounted) _openRegions();
+        }),
+      ),
+    ),
+  );
 
   // ---- Pins ------------------------------------------------------------------
 
@@ -168,8 +186,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           poi,
     ];
     // Closest to the centre first, so the cap trims the edges of the screen.
-    candidates.sort((a, b) => distanceMeters(center.latitude, center.longitude, a.latitude, a.longitude)
-        .compareTo(distanceMeters(center.latitude, center.longitude, b.latitude, b.longitude)));
+    candidates.sort(
+      (a, b) => distanceMeters(
+        center.latitude,
+        center.longitude,
+        a.latitude,
+        a.longitude,
+      ).compareTo(distanceMeters(center.latitude, center.longitude, b.latitude, b.longitude)),
+    );
     setState(() {
       _visiblePois = candidates.take(_maxPins).toList();
       if (drop) _startDrop();
@@ -202,7 +226,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _flight?.dispose();
     final start = _map.camera;
     final controller = _flight = AnimationController(vsync: this, duration: duration);
-    final distanceKm = distanceMeters(start.center.latitude, start.center.longitude, target.latitude, target.longitude) / 1000;
+    final distanceKm =
+        distanceMeters(start.center.latitude, start.center.longitude, target.latitude, target.longitude) / 1000;
     final pullBack = (math.log(1 + distanceKm) / math.ln10 * 1.2).clamp(0.0, 3.0);
     final curve = CurvedAnimation(parent: controller, curve: Curves.easeInOutCubic);
     controller
@@ -257,6 +282,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _focusPoi(Poi poi) {
+    // Remember the view before flying to the place: it is where a route
+    // starts when the device has no location of its own.
+    final viewBefore = _map.camera.center;
     setState(() => _highlightedPoi = poi.id);
     _flyTo(LatLng(poi.latitude, poi.longitude), math.max(_map.camera.zoom, 15));
     final center = _map.camera.center;
@@ -264,11 +292,83 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       context,
       poi,
       meters: distanceMeters(center.latitude, center.longitude, poi.latitude, poi.longitude),
+      onDirections: () => _openDirections(LatLng(poi.latitude, poi.longitude), poi.title, viewCenter: viewBefore),
     ).whenComplete(() {
       if (mounted) setState(() => _highlightedPoi = null);
     });
     // Make sure the focused place is drawn even if its category is hidden.
     if (!_visiblePois.contains(poi)) setState(() => _visiblePois = [..._visiblePois, poi]);
+  }
+
+  // ---- Directions ------------------------------------------------------------
+
+  /// Hazards currently shown on the map, as areas a route should avoid.
+  List<Avoid> _avoidNow() {
+    final showUnverified = context.read<AppSettings>().showUnverifiedHazards;
+    return avoidAreas([
+      for (final h in _hazardRepo.hazards)
+        if (isVisible(_hazardRepo.assess(h), showUnverified: showUnverified)) h,
+    ]);
+  }
+
+  void _openDirections(LatLng to, String label, {LatLng? viewCenter}) {
+    final region = _regions.activeRegion;
+    if (region == null) return;
+    _directions.open(to: to, label: label, regionId: region.id, avoid: _avoidNow(), viewCenter: viewCenter);
+  }
+
+  void _onHazardsChanged() => _directions.updateAvoid(_avoidNow());
+
+  /// Rebuilds, and frames a newly planned route so the whole of it shows
+  /// above the panel.
+  void _onDirectionsChanged() {
+    if (!mounted) return;
+    setState(() {});
+    final plan = _directions.plan;
+    if (plan == null || identical(plan, _shownPlan)) return;
+    _shownPlan = plan;
+    final points = [for (final leg in plan.legs) ...leg.points];
+    if (points.length < 2) return;
+    _map.fitCamera(
+      CameraFit.bounds(
+        bounds: LatLngBounds.fromPoints(points),
+        padding: EdgeInsets.fromLTRB(40, 150, 70, MediaQuery.sizeOf(context).height * 0.55),
+        maxZoom: 17,
+      ),
+    );
+    _updateVisiblePois();
+  }
+
+  /// Long-press on the map: plan a route to the spot, or report a hazard.
+  Future<void> _onLongPress(LatLng point) async {
+    HapticFeedback.heavyImpact();
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.directions_rounded),
+              title: const Text('Directions to here'),
+              onTap: () => Navigator.pop(context, 'directions'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_alert_rounded),
+              title: const Text('Report a hazard here'),
+              onTap: () => Navigator.pop(context, 'hazard'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case 'directions':
+        _openDirections(point, 'the marked spot');
+      case 'hazard':
+        showReportHazardSheet(context, latitude: point.latitude, longitude: point.longitude);
+    }
   }
 
   // ---- Build -----------------------------------------------------------------
@@ -306,16 +406,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 _viewportDebounce?.cancel();
                 _viewportDebounce = Timer(const Duration(milliseconds: 120), _updateVisiblePois);
               },
-              onLongPress: (_, point) {
-                HapticFeedback.heavyImpact();
-                showReportHazardSheet(context, latitude: point.latitude, longitude: point.longitude);
-              },
+              onLongPress: (_, point) => _onLongPress(point),
             ),
             children: [
               if (_basemapSource == null)
                 TopoBackground(animate: animate)
               else
                 BasemapLayer(source: _basemapSource!, mode: mode),
+              if (_directions.plan case final plan?) ...routeLayers(plan, scheme),
               MarkerLayer(
                 markers: [
                   for (final (i, poi) in _visiblePois.indexed)
@@ -363,7 +461,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
 
-          if (_radarRunning) Positioned.fill(child: RadarSweep(color: scheme.primary, onDone: _showNearest)),
+          if (_radarRunning)
+            Positioned.fill(
+              child: RadarSweep(color: scheme.primary, onDone: _showNearest),
+            ),
 
           // Top: search and category filters.
           SafeArea(
@@ -404,55 +505,69 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
           ),
 
-          // Bottom: status, attribution and the main actions.
-          Positioned(
-            left: 12,
-            right: 12,
-            bottom: MediaQuery.paddingOf(context).bottom + 12,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+          // Bottom: the directions panel while it's open...
+          if (_directions.isOpen)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: MediaQuery.paddingOf(context).bottom + 12,
+              child: Center(
+                child: DirectionsPanel(
+                  directions: _directions,
+                  onStepTap: (step) => _flyTo(step.at, math.max(_map.camera.zoom, 16)),
+                ),
+              ),
+            )
+          // ...otherwise status, attribution and the main actions.
+          else
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: MediaQuery.paddingOf(context).bottom + 12,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SyncStatusChip(status: hazardsRepo.syncStatus),
+                        const SizedBox(height: 6),
+                        RegionStatusChip(region: active, offline: regions.files.storesOffline),
+                        const SizedBox(height: 6),
+                        const AttributionChip(),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
                     mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      SyncStatusChip(status: hazardsRepo.syncStatus),
-                      const SizedBox(height: 6),
-                      RegionStatusChip(region: active, offline: regions.files.storesOffline),
-                      const SizedBox(height: 6),
-                      const AttributionChip(),
+                      FloatingActionButton.small(
+                        heroTag: 'report',
+                        tooltip: 'Report a hazard here (or long-press the map)',
+                        backgroundColor: scheme.errorContainer,
+                        foregroundColor: scheme.onErrorContainer,
+                        onPressed: () {
+                          final c = _map.camera.center;
+                          showReportHazardSheet(context, latitude: c.latitude, longitude: c.longitude);
+                        },
+                        child: const Icon(Icons.add_alert_rounded),
+                      ),
+                      const SizedBox(height: 10),
+                      FloatingActionButton.extended(
+                        heroTag: 'nearest',
+                        onPressed: _pois.isEmpty ? _openRegions : _runRadar,
+                        icon: Icon(_pois.isEmpty ? Icons.download_rounded : Icons.radar_rounded),
+                        label: Text(_pois.isEmpty ? 'Get a map' : 'Nearest supplies'),
+                      ),
                     ],
                   ),
-                ),
-                const SizedBox(width: 12),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    FloatingActionButton.small(
-                      heroTag: 'report',
-                      tooltip: 'Report a hazard here (or long-press the map)',
-                      backgroundColor: scheme.errorContainer,
-                      foregroundColor: scheme.onErrorContainer,
-                      onPressed: () {
-                        final c = _map.camera.center;
-                        showReportHazardSheet(context, latitude: c.latitude, longitude: c.longitude);
-                      },
-                      child: const Icon(Icons.add_alert_rounded),
-                    ),
-                    const SizedBox(height: 10),
-                    FloatingActionButton.extended(
-                      heroTag: 'nearest',
-                      onPressed: _pois.isEmpty ? _openRegions : _runRadar,
-                      icon: Icon(_pois.isEmpty ? Icons.download_rounded : Icons.radar_rounded),
-                      label: Text(_pois.isEmpty ? 'Get a map' : 'Nearest supplies'),
-                    ),
-                  ],
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
 
           if (regions.loaded && active == null) Center(child: NoMapCard(onChoose: _openRegions)),
         ],
