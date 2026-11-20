@@ -9,6 +9,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../hazards/effects/nuclear_view.dart';
+import '../hazards/effects/spread_view.dart';
 import '../hazards/hazard_engine.dart';
 import '../hazards/hazard_filter.dart';
 import '../hazards/hazard_repository.dart';
@@ -456,6 +457,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 TopoBackground(animate: animate)
               else
                 BasemapLayer(source: _basemapSource!, mode: mode),
+              spreadLayer([for (final h in hazards) h.hazard]),
               nuclearRingsLayer([for (final h in hazards) h.hazard], settings.nuclearView),
               if (_directions.plan case final plan?) ...routeLayers(plan, scheme),
               MarkerLayer(

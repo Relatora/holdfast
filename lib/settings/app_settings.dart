@@ -32,6 +32,7 @@ class AppSettings extends ChangeNotifier {
   static const _kShowUnverified = 'showUnverifiedHazards';
   static const _kHazardCategories = 'hazardCategories';
   static const _kNuclearView = 'nuclearView';
+  static const _kFetchWind = 'fetchWind';
   static const _kDeviceId = 'deviceId';
 
   final SharedPreferences _prefs;
@@ -83,6 +84,14 @@ class AppSettings extends ChangeNotifier {
       };
   set hazardCategories(Set<HazardCategory> value) {
     _prefs.setStringList(_kHazardCategories, [for (final c in value) c.name]);
+    notifyListeners();
+  }
+
+  /// Whether "Use current wind" may ask Open-Meteo for the wind at a
+  /// hazard. Only the hazard's coordinates are sent.
+  bool get fetchWind => _prefs.getBool(_kFetchWind) ?? true;
+  set fetchWind(bool value) {
+    _prefs.setBool(_kFetchWind, value);
     notifyListeners();
   }
 
