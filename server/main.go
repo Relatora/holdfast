@@ -6,6 +6,13 @@
 //	PORT          listen port (default 8787)
 //	REGIONS_DIR   directory with <id>.pmtiles and <id>.pois.json (default ../regions)
 //	DATABASE_URL  PostgreSQL+PostGIS connection string; in-memory store when unset
+//
+// On-demand region preparation (see prepare.go):
+//
+//	CATALOG            the app's region catalog (default ../assets/regions/catalog.json)
+//	TOOLS_DIR          the repo's tool/ directory (default ../tool)
+//	PYTHON             Python interpreter for the tools (default python)
+//	PREPARE_MAX_BYTES  largest region built on demand (default 8 GB)
 package main
 
 import (
@@ -15,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -40,9 +48,27 @@ func main() {
 		log.Print("using in-memory store (set DATABASE_URL for PostgreSQL)")
 	}
 
+	server := &Server{store: store, regionsDir: regionsDir}
+	catalogPath := envOr("CATALOG", "../assets/regions/catalog.json")
+	if catalog, err := LoadCatalog(catalogPath); err != nil {
+		log.Printf("on-demand region preparation off: %v", err)
+	} else {
+		maxBytes, err := strconv.ParseInt(envOr("PREPARE_MAX_BYTES", "8000000000"), 10, 64)
+		if err != nil {
+			log.Fatalf("PREPARE_MAX_BYTES: %v", err)
+		}
+		builder := ToolBuilder{
+			Python:   envOr("PYTHON", "python"),
+			ToolsDir: envOr("TOOLS_DIR", "../tool"),
+			OutDir:   regionsDir,
+		}
+		server.preparer = NewPreparer(ctx, regionsDir, catalog, builder, maxBytes)
+		log.Printf("preparing regions up to %d MB on demand", maxBytes/1e6)
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           logRequests((&Server{store: store, regionsDir: regionsDir}).Routes()),
+		Handler:           logRequests(server.Routes()),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

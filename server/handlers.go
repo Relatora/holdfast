@@ -23,6 +23,9 @@ const (
 type Server struct {
 	store      Store
 	regionsDir string
+	// preparer builds missing regions on demand; nil turns that off (for
+	// example when the catalog file can't be found).
+	preparer *Preparer
 }
 
 // Routes wires every endpoint, wrapped in CORS so the web build can call
@@ -36,6 +39,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/events", s.getEvents)
 	mux.HandleFunc("GET /regions/index.json", s.regionIndex)
 	mux.HandleFunc("GET /regions/{file}", s.regionFile)
+	mux.HandleFunc("POST /regions/{id}/prepare", s.startPrepare)
+	mux.HandleFunc("GET /regions/{id}/prepare", s.prepareStatus)
 	return withCORS(mux)
 }
 
@@ -175,7 +180,58 @@ func (s *Server) regionIndex(w http.ResponseWriter, _ *http.Request) {
 		}
 		regions[id] = e
 	}
-	writeJSON(w, map[string]any{"regions": regions})
+	// "prepare" tells the app which missing regions it can still offer:
+	// anything up to maxBytes. "jobs" lets it resume showing progress for
+	// work started before it was restarted.
+	prepare := map[string]any{"enabled": false}
+	jobs := map[string]Job{}
+	if s.preparer != nil {
+		prepare = map[string]any{"enabled": true, "maxBytes": s.preparer.MaxBytes()}
+		jobs = s.preparer.Active()
+	}
+	writeJSON(w, map[string]any{"regions": regions, "prepare": prepare, "jobs": jobs})
+}
+
+var regionID = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+// startPrepare queues a region build. 202 with the job; repeated calls
+// return the same job, so the app can simply call it again after a restart.
+func (s *Server) startPrepare(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.preparer == nil || !regionID.MatchString(id) {
+		http.NotFound(w, r)
+		return
+	}
+	job, err := s.preparer.Start(id)
+	switch {
+	case errors.Is(err, errUnknownRegion):
+		httpError(w, http.StatusNotFound, "unknown region %q", id)
+	case errors.Is(err, errTooBig):
+		httpError(w, http.StatusRequestEntityTooLarge,
+			"%s is larger than this server prepares on demand (%d MB)", id, s.preparer.MaxBytes()/1e6)
+	case errors.Is(err, errStreamed):
+		httpError(w, http.StatusConflict, "%s streams from its own source", id)
+	case err != nil:
+		httpError(w, http.StatusInternalServerError, "%v", err)
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(job)
+	}
+}
+
+func (s *Server) prepareStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.preparer == nil || !regionID.MatchString(id) {
+		http.NotFound(w, r)
+		return
+	}
+	job, ok := s.preparer.Status(id)
+	if !ok {
+		httpError(w, http.StatusNotFound, "no preparation job for %q", id)
+		return
+	}
+	writeJSON(w, job)
 }
 
 // regionFile serves one region file. http.ServeContent implements Range,

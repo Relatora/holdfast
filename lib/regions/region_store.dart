@@ -14,7 +14,13 @@ enum RegionPhase {
   /// The server has it; it can be downloaded.
   available,
 
-  /// Listed in the catalog but not hosted yet (or the server is unreachable).
+  /// The server doesn't have it yet but can build it on request.
+  preparable,
+
+  /// The server is building it; the download follows automatically.
+  preparing,
+
+  /// Can't be had right now: see [RegionStore.unavailableReason].
   unavailable,
 
   downloading,
@@ -27,22 +33,33 @@ enum RegionPhase {
 
 @immutable
 class RegionState {
-  const RegionState(this.phase, {this.received = 0, this.total = 0, this.error});
+  const RegionState(this.phase, {this.received = 0, this.total = 0, this.error, this.step});
 
   final RegionPhase phase;
   final int received;
   final int total;
   final String? error;
 
+  /// While preparing: "queued", "map" or "supplies".
+  final String? step;
+
   double get progress => total == 0 ? 0 : received / total;
 }
+
+/// Why a region can't be downloaded right now.
+enum UnavailableReason { serverUnreachable, tooBig, notHosted }
 
 /// The catalog of regions, what the server hosts, and what's on this device.
 ///
 /// Region availability comes from the server's `index.json`, which lists the
-/// files it actually has with their real sizes. The catalog shipped inside
-/// the app supplies names, bounding boxes and size estimates, so the list
-/// still renders (marked unavailable) when the server can't be reached.
+/// files it actually has with their real sizes, plus how large a region it
+/// is willing to build on request. The catalog shipped inside the app
+/// supplies names, bounding boxes and measured sizes, so the list still
+/// renders (marked unavailable) when the server can't be reached.
+///
+/// Getting a region the server doesn't host yet is two steps that look like
+/// one to the user: ask the server to prepare it (following its progress),
+/// then download it as usual. See [download].
 class RegionStore extends ChangeNotifier {
   RegionStore({RegionFiles? files, http.Client? client})
       : files = files ?? RegionFiles(),
@@ -59,6 +76,16 @@ class RegionStore extends ChangeNotifier {
   final Map<String, bool> _hostedPois = {};
   final Map<String, RegionState> _states = {};
   final Map<String, DownloadCancel> _cancels = {};
+
+  /// Regions whose server-side preparation this store is following.
+  final Set<String> _watching = {};
+
+  /// Largest region the server builds on demand; null when it doesn't.
+  int? prepareMaxBytes;
+
+  /// How often to ask the server how a preparation is going.
+  @visibleForTesting
+  static Duration pollInterval = const Duration(seconds: 1);
   Set<String> _ready = {};
   String? _activeId;
   bool loaded = false;
@@ -104,7 +131,8 @@ class RegionStore extends ChangeNotifier {
           .get(Uri.parse('${Config.regionsUrl}/index.json'))
           .timeout(const Duration(seconds: 6));
       if (response.statusCode != 200) throw StateError('HTTP ${response.statusCode}');
-      final index = (jsonDecode(response.body) as Map<String, Object?>)['regions']! as Map;
+      final body = jsonDecode(response.body) as Map<String, Object?>;
+      final index = body['regions']! as Map;
       _hostedBytes.clear();
       _hostedPois.clear();
       index.forEach((id, value) {
@@ -112,7 +140,20 @@ class RegionStore extends ChangeNotifier {
         _hostedBytes[id as String] = (entry['pmtilesBytes']! as num).toInt();
         _hostedPois[id] = entry['poisBytes'] != null;
       });
+      // Older servers send neither key: no on-demand preparation.
+      final prepare = (body['prepare'] as Map?)?.cast<String, Object?>();
+      prepareMaxBytes = prepare?['enabled'] == true ? (prepare!['maxBytes'] as num?)?.toInt() : null;
       serverReachable = true;
+      // Pick up work started before the app last closed, so its progress
+      // shows instead of a plain download button.
+      final jobs = (body['jobs'] as Map?)?.cast<String, Object?>() ?? const {};
+      jobs.forEach((id, value) {
+        final state = (value as Map)['state'];
+        final region = byId(id);
+        if (region != null && (state == 'queued' || state == 'running') && !_watching.contains(id)) {
+          download(region);
+        }
+      });
     } catch (_) {
       serverReachable = false;
     }
@@ -153,7 +194,42 @@ class RegionStore extends ChangeNotifier {
     final explicit = _states[region.id];
     if (explicit != null) return explicit;
     if (_ready.contains(region.id)) return const RegionState(RegionPhase.ready);
-    return RegionState(isHosted(region) ? RegionPhase.available : RegionPhase.unavailable);
+    if (isHosted(region)) return const RegionState(RegionPhase.available);
+    return RegionState(unavailableReason(region) == null ? RegionPhase.preparable : RegionPhase.unavailable);
+  }
+
+  /// Why [region] can be neither downloaded nor prepared, or null if it can.
+  UnavailableReason? unavailableReason(Region region) {
+    if (isHosted(region)) return null;
+    if (!serverReachable) return UnavailableReason.serverUnreachable;
+    final max = prepareMaxBytes;
+    if (max == null) return UnavailableReason.notHosted;
+    if (region.approxBytes > max) return UnavailableReason.tooBig;
+    return null;
+  }
+
+  /// Regions stored on, or on their way to, this device: the "On this
+  /// device" list, with the active map first.
+  List<Region> get deviceRegions {
+    final list = [
+      for (final region in regions)
+        if (_ready.contains(region.id) || _states.containsKey(region.id)) region,
+    ];
+    // Stable sort: only the active map moves; the rest keep catalog order.
+    final active = list.where((r) => r.id == _activeId).toList();
+    return [...active, ...list.where((r) => r.id != _activeId)];
+  }
+
+  /// Regions whose name, or whose parent's name, contains [query]
+  /// ("ontario" also finds Ottawa and Sarnia).
+  List<Region> search(String query) {
+    final needle = query.trim().toLowerCase();
+    if (needle.isEmpty) return const [];
+    bool matches(Region? r) => r != null && r.name.toLowerCase().contains(needle);
+    return [
+      for (final region in regions)
+        if (matches(region) || matches(byId(region.parentId))) region,
+    ];
   }
 
   /// A path or URL the map can open for [region].
@@ -182,8 +258,15 @@ class RegionStore extends ChangeNotifier {
 
   // ---- Actions -------------------------------------------------------------
 
+  /// Downloads [region], first asking the server to prepare it when it
+  /// doesn't host it yet.
   Future<void> download(Region region) async {
-    if (stateOf(region).phase == RegionPhase.downloading) return;
+    final phase = stateOf(region).phase;
+    if (phase == RegionPhase.downloading || phase == RegionPhase.preparing) return;
+    if (!isHosted(region) || _missingSupplies(region)) {
+      final prepared = await _prepare(region);
+      if (!prepared) return;
+    }
     final cancel = _cancels[region.id] = DownloadCancel();
     _states[region.id] = RegionState(RegionPhase.downloading, total: sizeOf(region));
     notifyListeners();
@@ -209,6 +292,68 @@ class RegionStore extends ChangeNotifier {
     } catch (error) {
       _states[region.id] = RegionState(RegionPhase.failed, error: '$error');
     } finally {
+      _cancels.remove(region.id);
+      notifyListeners();
+    }
+  }
+
+  /// A hosted city or province whose supply list failed to build (Overpass
+  /// is a shared service and sometimes overloaded). Asking the server to
+  /// prepare it again retries just the list, so the download isn't a map
+  /// with no supplies on it.
+  bool _missingSupplies(Region region) =>
+      prepareMaxBytes != null &&
+      region.remoteUrl == null &&
+      (region.level == RegionLevel.city || region.level == RegionLevel.province) &&
+      _hostedBytes.containsKey(region.id) &&
+      !(_hostedPois[region.id] ?? false);
+
+  /// Asks the server to build [region] and follows its progress. Returns
+  /// true once the files are hosted.
+  ///
+  /// The server-side job can't be cancelled from here (another device may
+  /// want the same region), so cancelling only stops waiting; the region
+  /// then shows as available once the server finishes.
+  Future<bool> _prepare(Region region) async {
+    final cancel = _cancels[region.id] = DownloadCancel();
+    _watching.add(region.id);
+    _states[region.id] = RegionState(RegionPhase.preparing, total: region.approxBytes, step: 'queued');
+    notifyListeners();
+    final url = Uri.parse('${Config.regionsUrl}/${region.id}/prepare');
+    try {
+      var response = await _client.post(url).timeout(const Duration(seconds: 15));
+      while (true) {
+        final job = (jsonDecode(response.body) as Map).cast<String, Object?>();
+        if (response.statusCode >= 400) {
+          throw StateError(job['error'] as String? ?? 'HTTP ${response.statusCode}');
+        }
+        switch (job['state']) {
+          case 'done':
+            _states.remove(region.id);
+            await refreshHosted();
+            return isHosted(region);
+          case 'failed':
+            throw StateError(job['error'] as String? ?? 'Preparation failed');
+        }
+        _states[region.id] = RegionState(
+          RegionPhase.preparing,
+          received: (job['bytesDone'] as num? ?? 0).toInt(),
+          total: (job['bytesTotal'] as num? ?? region.approxBytes).toInt(),
+          step: job['state'] == 'queued' ? 'queued' : job['step'] as String?,
+        );
+        notifyListeners();
+        await Future<void>.delayed(pollInterval);
+        if (cancel.isCancelled) {
+          _states.remove(region.id);
+          return false;
+        }
+        response = await _client.get(url).timeout(const Duration(seconds: 15));
+      }
+    } catch (error) {
+      _states[region.id] = RegionState(RegionPhase.failed, error: '$error');
+      return false;
+    } finally {
+      _watching.remove(region.id);
       _cancels.remove(region.id);
       notifyListeners();
     }
