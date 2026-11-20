@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../map/hazard_marker.dart';
 import '../pois/poi.dart' show distanceMeters, formatDistance;
 import '../settings/app_settings.dart';
+import '../training/training_hooks.dart';
 import 'hazard.dart';
 import 'hazard_engine.dart';
 import 'hazard_filter.dart';
@@ -47,6 +48,7 @@ class _HazardsSheetState extends State<_HazardsSheet> {
     } else {
       settings.hazardCategories = shown..add(category);
     }
+    TrainingHooks.report(FilteredHazards(settings.hazardCategories));
   }
 
   @override
@@ -58,7 +60,7 @@ class _HazardsSheetState extends State<_HazardsSheet> {
 
     final active = [
       for (final h in repo.hazards)
-        if (isVisible(repo.assess(h), showUnverified: settings.showUnverifiedHazards)) h,
+        if (isVisible(repo.assess(h), showUnverified: settings.showUnverifiedHazards || repo.isSandbox)) h,
     ];
     final counts = countByCategory(active);
     final listed = sortHazards(

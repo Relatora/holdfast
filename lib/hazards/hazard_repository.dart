@@ -23,8 +23,27 @@ enum SyncStatus { idle, syncing, synced, offline }
 /// * The visible hazards are always `foldHazardEvents(log)`, recomputed on
 ///   change and once a minute so expiry and fade-out happen on time.
 class HazardRepository extends ChangeNotifier {
-  HazardRepository({required this.deviceId, this.sync, DateTime Function()? clock})
+  HazardRepository({required this.deviceId, this.sync, DateTime Function()? clock, this.persist = true})
       : _clock = clock ?? DateTime.now;
+
+  /// A throwaway repository for training: nothing is read from or written to
+  /// storage and nothing is synced, so practice reports can never reach the
+  /// real map or anyone else.
+  HazardRepository.sandbox({required this.deviceId, DateTime Function()? clock})
+      : sync = null,
+        persist = false,
+        _clock = clock ?? DateTime.now;
+
+  /// False for [HazardRepository.sandbox]: the log lives in memory only.
+  final bool persist;
+
+  /// A training sandbox. Its pretend reports are shown whether or not
+  /// they're verified: the point is to practise with them.
+  bool get isSandbox => !persist;
+
+  /// Called with every event this device records (a report or vote made
+  /// here). Training uses it to check the player's objectives.
+  void Function(HazardEvent event)? onRecorded;
 
   final String deviceId;
   /// Null in tests and when running fully offline.
@@ -71,6 +90,16 @@ class HazardRepository extends ChangeNotifier {
 
   ReporterRecord get myRecord => recordFor(deviceId);
 
+  /// Takes in events from a source other than sync: a training scenario
+  /// today, a mesh or radio link later. They are folded like synced events
+  /// and not re-sent.
+  void receive(Iterable<HazardEvent> events) {
+    events.forEach(_append);
+    _refold();
+    notifyListeners();
+    unawaited(_save());
+  }
+
   /// Publishes that this device finished every training scenario. Other
   /// devices give it a small, capped head start (see [ReporterRecord]).
   Future<void> publishTrainingCredential(List<String> scenarios) async {
@@ -79,6 +108,14 @@ class HazardRepository extends ChangeNotifier {
   }
 
   Future<void> load() async {
+    if (!persist) {
+      _refold();
+      _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+        _refold();
+        notifyListeners();
+      });
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_kLog);
     if (raw != null) {
@@ -227,6 +264,7 @@ class HazardRepository extends ChangeNotifier {
 
   Future<void> _record(HazardEvent event, {bool outbox = true}) async {
     _append(event);
+    onRecorded?.call(event);
     if (outbox) _outbox.add(event.id);
     _refold();
     notifyListeners();
@@ -268,6 +306,7 @@ class HazardRepository extends ChangeNotifier {
   }
 
   Future<void> _save() async {
+    if (!persist) return;
     final prefs = await SharedPreferences.getInstance();
     // Drop events for hazards that ended more than 60 days ago, so the local
     // log can't grow forever. Settled hazards are kept that long because
