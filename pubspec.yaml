@@ -2,7 +2,7 @@ name: holdfast
 description: "Offline survival map: supplies, hazards and off-grid networking."
 publish_to: 'none'
 
-version: 0.2.0+4
+version: 0.3.0+5
 
 environment:
   sdk: ^3.14.0
