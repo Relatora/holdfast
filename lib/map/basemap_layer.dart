@@ -1,15 +1,18 @@
+import 'package:flutter_map/flutter_map.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
-import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 
 import '../theme/app_theme_mode.dart';
 import 'basemap_style.dart';
+import 'resilient_tile_provider.dart';
 
 /// The vector basemap for one PMTiles source (a local file or a URL),
 /// styled to match the app theme.
 ///
 /// Opening an archive reads its header and directory, so it's done once per
-/// source and cached; switching themes only swaps the style.
+/// source and cached; switching themes only swaps the style. Reads go through
+/// [ResilientTileProvider], which recovers if the archive's cache is poisoned
+/// by a failed read.
 class BasemapLayer extends StatefulWidget {
   const BasemapLayer({super.key, required this.source, required this.mode});
 
@@ -24,19 +27,53 @@ class BasemapLayer extends StatefulWidget {
 }
 
 class _BasemapLayerState extends State<BasemapLayer> {
-  late Future<PmTilesVectorTileProvider> _provider = PmTilesVectorTileProvider.fromSource(widget.source);
+  late Future<ResilientTileProvider> _provider = _open(widget.source);
+
+  Future<ResilientTileProvider> _open(String source) async {
+    final provider = await ResilientTileProvider.open(() => PmTilesTileArchive.open(source));
+    _kickUntilFirstRequest(provider);
+    return provider;
+  }
+
+  /// Works around a start-up race in the tile layer.
+  ///
+  /// The vector tile layer's own initial load never reaches the provider;
+  /// only camera events after the layer has subscribed to them do. When
+  /// nothing moves the camera after that moment (a cold start with the
+  /// region already chosen), the map stays blank until someone pans. One
+  /// nudge right after the layer appears usually works, but it can land
+  /// before the layer subscribes. So: pan one pixel and back every 300 ms
+  /// until the provider has received its first tile request, at most 20
+  /// times. Each nudge is invisible, and the loop stops as soon as tiles
+  /// flow.
+  void _kickUntilFirstRequest(ResilientTileProvider provider, {int attempt = 0}) {
+    Future<void>.delayed(Duration(milliseconds: attempt == 0 ? 0 : 300), () {
+      if (!mounted || provider.requestCount > 0 || attempt >= 20) return;
+      final controller = MapController.maybeOf(context);
+      final camera = MapCamera.maybeOf(context);
+      if (controller != null && camera != null) {
+        final center = camera.center;
+        final shifted = camera.unprojectAtZoom(camera.projectAtZoom(center) + const Offset(1, 0));
+        controller.move(shifted, camera.zoom);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) controller.move(center, camera.zoom);
+        });
+      }
+      _kickUntilFirstRequest(provider, attempt: attempt + 1);
+    });
+  }
 
   @override
   void didUpdateWidget(BasemapLayer old) {
     super.didUpdateWidget(old);
     if (old.source != widget.source) {
-      _provider = PmTilesVectorTileProvider.fromSource(widget.source);
+      _provider = _open(widget.source);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<PmTilesVectorTileProvider>(
+    return FutureBuilder<ResilientTileProvider>(
       future: _provider,
       builder: (context, snapshot) {
         final provider = snapshot.data;

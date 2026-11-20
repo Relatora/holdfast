@@ -107,11 +107,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final source = await _regions.basemapSource(region);
     final raw = await _regions.poisJson(region);
     if (!mounted || _poisRegionId != region.id) return;
+    final firstRegion = _basemapSource == null;
     setState(() {
       _basemapSource = source;
       _pois = raw == null ? PoiIndex.empty : PoiIndex.fromPack(jsonDecode(raw) as Map<String, Object?>);
     });
-    _flyTo(region.center, region.fitZoom + 1.5);
+    // Fly between regions, but jump straight to the first one: flying in from
+    // the zoomed-out world view requests (and cancels) tiles at every zoom on
+    // the way, a burst that's all cost and no information.
+    if (firstRegion) {
+      _map.move(region.center, region.fitZoom + 1.5);
+      _updateVisiblePois();
+    } else {
+      _flyTo(region.center, region.fitZoom + 1.5);
+    }
   }
 
   Future<void> _maybeShowOnboarding() async {
