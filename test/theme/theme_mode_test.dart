@@ -38,4 +38,30 @@ void main() {
       expect(color.g, lessThan(0.2), reason: '$color has green');
     }
   });
+
+  test('night vision text carries no blue light, in every text style', () {
+    final text = AppTheme.nightVision().textTheme;
+    final styles = {
+      'displayLarge': text.displayLarge,
+      'headlineSmall': text.headlineSmall,
+      'titleLarge': text.titleLarge,
+      'titleMedium': text.titleMedium,
+      'bodyLarge': text.bodyLarge,
+      'bodyMedium': text.bodyMedium,
+      'bodySmall': text.bodySmall,
+      'labelLarge': text.labelLarge,
+    };
+    for (final MapEntry(key: name, value: style) in styles.entries) {
+      final color = style?.color;
+      expect(color, isNotNull, reason: name);
+      expect((color!.b * 255).round(), 0, reason: '$name must have no blue');
+    }
+  });
+
+  test('headings and figures use the condensed face, body text the regular one', () {
+    final text = AppTheme.dark().textTheme;
+    expect(text.headlineSmall?.fontFamily, AppTheme.displayFamily);
+    expect(text.titleLarge?.fontFamily, AppTheme.displayFamily);
+    expect(text.bodyMedium?.fontFamily, AppTheme.bodyFamily);
+  });
 }

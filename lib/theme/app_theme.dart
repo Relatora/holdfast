@@ -87,10 +87,50 @@ abstract final class AppTheme {
         ),
       );
 
+  /// Body and UI text.
+  static const bodyFamily = 'Barlow';
+
+  /// Headings and figures: the condensed cut fits a time, a distance or a
+  /// rank in a small space and reads like a road sign.
+  static const displayFamily = 'Barlow Condensed';
+
+  /// The type scale: Barlow throughout, with the display, headline and
+  /// large-title roles in Barlow Condensed SemiBold. Sizes follow Material's
+  /// scale; Barlow is a little narrower than Roboto, so body text gains a
+  /// touch of letter-spacing and weight to stay easy to read outdoors.
+  static TextTheme _typeScale() {
+    // Geometry only (sizes, weights, spacing) with no colours: ThemeData
+    // colours text from the scheme, and a coloured base would override it.
+    // In night vision that would mean white text, exactly the light the
+    // theme exists to keep out.
+    final base = Typography.material2021().englishLike.apply(fontFamily: bodyFamily);
+    TextStyle? display(TextStyle? style, {double spacing = 0}) =>
+        style?.copyWith(fontFamily: displayFamily, fontWeight: FontWeight.w600, letterSpacing: spacing);
+    TextStyle? body(TextStyle? style) => style?.copyWith(fontWeight: FontWeight.w500, letterSpacing: 0.15);
+    return base.copyWith(
+      displayLarge: display(base.displayLarge, spacing: -0.5),
+      displayMedium: display(base.displayMedium, spacing: -0.25),
+      displaySmall: display(base.displaySmall),
+      headlineLarge: display(base.headlineLarge),
+      headlineMedium: display(base.headlineMedium),
+      headlineSmall: display(base.headlineSmall),
+      titleLarge: display(base.titleLarge, spacing: 0.2),
+      titleMedium: base.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+      bodyLarge: body(base.bodyLarge),
+      bodyMedium: body(base.bodyMedium),
+      bodySmall: base.bodySmall?.copyWith(letterSpacing: 0.2),
+      labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w600, letterSpacing: 0.2),
+    );
+  }
+
   static ThemeData _build(ColorScheme scheme) {
     final rounded = RoundedRectangleBorder(borderRadius: BorderRadius.circular(18));
     return ThemeData(
       colorScheme: scheme,
+      fontFamily: bodyFamily,
+      // Text colour comes from the scheme explicitly, so night vision's
+      // text is red by construction rather than by each widget's default.
+      textTheme: _typeScale().apply(bodyColor: scheme.onSurface, displayColor: scheme.onSurface),
       scaffoldBackgroundColor: scheme.surface,
       visualDensity: VisualDensity.standard,
       // Bottom sheets and cards share one soft, rounded shape language.

@@ -109,7 +109,7 @@ class _MyReportingScreenState extends State<MyReportingScreen> {
                 crossAxisCount: columns,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                childAspectRatio: 0.72,
+                childAspectRatio: 0.95,
                 children: [
                   for (final a in achievements)
                     _AchievementTile(

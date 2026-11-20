@@ -43,3 +43,26 @@ flutter:
   assets:
     - assets/regions/catalog.json
 
+  # Barlow: a typeface in the spirit of road signs and field equipment,
+  # legible at a glance under stress. Bundled, never fetched, because the
+  # app has to look right with no network. SIL Open Font License 1.1, see
+  # assets/fonts/OFL.txt.
+  fonts:
+    - family: Barlow
+      fonts:
+        - asset: assets/fonts/Barlow-Regular.ttf
+        - asset: assets/fonts/Barlow-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Barlow-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Barlow-Bold.ttf
+          weight: 700
+    - family: Barlow Condensed
+      fonts:
+        - asset: assets/fonts/BarlowCondensed-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/BarlowCondensed-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/BarlowCondensed-Bold.ttf
+          weight: 700
+
