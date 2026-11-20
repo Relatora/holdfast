@@ -14,6 +14,7 @@ requests, so a city-sized region costs tens of megabytes of download, not the
 Usage:
     python tool/fetch_region.py ottawa
     python tool/fetch_region.py ottawa --maxzoom 13
+    python tool/fetch_region.py toronto --dry-run   # size only, no download
 
 Requires Go (the official go-pmtiles CLI is run with ``go run``).
 """
@@ -66,6 +67,13 @@ def main() -> None:
         default=14,
         help="highest zoom to keep; the app over-zooms beyond it (default 14)",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=("report how big the extract would be without downloading it. "
+              "go-pmtiles reads only the archive's directories, so this is "
+              "the real size, not a guess, and costs a few MB at most"),
+    )
     args = parser.parse_args()
 
     if shutil.which("go") is None:
@@ -77,15 +85,18 @@ def main() -> None:
     target = OUT_DIR / f"{region['id']}.pmtiles"
 
     source = latest_planet_url()
-    print(f"Extracting {region['name']} from {source}")
-    subprocess.run(
-        [
-            "go", "run", GO_PMTILES, "extract", source, str(target),
-            f"--bbox={west},{south},{east},{north}",
-            f"--maxzoom={args.maxzoom}",
-        ],
-        check=True,
-    )
+    command = [
+        "go", "run", GO_PMTILES, "extract", source, str(target),
+        f"--bbox={west},{south},{east},{north}",
+        f"--maxzoom={args.maxzoom}",
+    ]
+    if args.dry_run:
+        print(f"Measuring {region['name']} in {source} (dry run, nothing is downloaded)", flush=True)
+        subprocess.run([*command, "--dry-run"], check=True)
+        return
+
+    print(f"Extracting {region['name']} from {source}", flush=True)
+    subprocess.run(command, check=True)
     size_mb = target.stat().st_size / 1_000_000
     print(f"Wrote {target} ({size_mb:.1f} MB)")
 

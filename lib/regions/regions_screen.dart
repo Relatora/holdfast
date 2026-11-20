@@ -97,14 +97,37 @@ class _RegionList extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
           child: Text(level.hint, style: Theme.of(context).textTheme.bodyMedium),
         ),
-        for (final (i, region) in regions.indexed)
-          animate
+        for (final (i, region) in regions.indexed) ...[
+          // Long levels (65 provinces and states) get a heading per country.
+          // The catalog lists regions grouped by parent, so a heading goes
+          // wherever the parent changes.
+          if (level == RegionLevel.province && (i == 0 || regions[i - 1].parentId != region.parentId))
+            _GroupHeading(store.byId(region.parentId)?.name ?? 'Other'),
+          // Only the first screenful animates in; staggering 65 tiles would
+          // keep the last ones hidden for seconds.
+          animate && i < 12
               ? _RegionTile(region: region)
                   .animate(delay: (40 * i).ms)
                   .fadeIn(duration: 260.ms)
                   .slideX(begin: 0.06, end: 0, curve: Curves.easeOutCubic)
               : _RegionTile(region: region),
+        ],
       ],
+    );
+  }
+}
+
+class _GroupHeading extends StatelessWidget {
+  const _GroupHeading(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 16, 8, 6),
+      child: Text(text, style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.primary)),
     );
   }
 }
