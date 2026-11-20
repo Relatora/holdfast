@@ -15,6 +15,9 @@ import '../hazards/hazard_filter.dart';
 import '../hazards/hazard_repository.dart';
 import '../hazards/hazard_sheets.dart';
 import '../hazards/hazards_sheet.dart';
+import '../reputation/achievement_badge.dart';
+import '../reputation/achievements.dart';
+import '../reputation/my_reporting_screen.dart';
 import '../map/basemap_layer.dart';
 import '../map/hazard_marker.dart';
 import '../map/poi_marker.dart';
@@ -91,6 +94,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _regions.addListener(_onRegionsChanged);
     // New or expired hazard reports change what a route should avoid.
     _hazardRepo.addListener(_onHazardsChanged);
+    _hazardRepo.thanks.addListener(_onThanks);
     // The store may have finished loading before this screen subscribed, in
     // which case no notification is coming; check its current state once.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -103,6 +107,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void dispose() {
     _regions.removeListener(_onRegionsChanged);
     _hazardRepo.removeListener(_onHazardsChanged);
+    _hazardRepo.thanks.removeListener(_onThanks);
     _directions.dispose();
     _dropTimer?.cancel();
     _viewportDebounce?.cancel();
@@ -334,6 +339,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   // ---- Hazards ---------------------------------------------------------------
+
+  /// Someone confirmed one of our reports: say thank you, with the badge of
+  /// the rank it helps build.
+  void _onThanks() {
+    final thanks = _hazardRepo.thanks.value;
+    if (thanks == null || !mounted) return;
+    final tier = Tier.of(_hazardRepo.myRecord);
+    final people = thanks.confirmations == 1 ? 'Someone' : '${thanks.confirmations} people';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      duration: const Duration(seconds: 6),
+      content: Row(
+        children: [
+          AchievementBadge(icon: tier.icon, color: tier.color, size: 36, celebrate: true, animate: Motion.enabledNow(context)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '$people confirmed your ${thanks.hazard.type.label.toLowerCase()} report. Thank you! '
+              'Your reports now count ${thanks.multiplier.toStringAsFixed(1)}×.',
+            ),
+          ),
+        ],
+      ),
+      action: SnackBarAction(
+        label: 'See',
+        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyReportingScreen())),
+      ),
+    ));
+  }
 
   Future<void> _openHazards() async {
     final hazard = await showHazardsSheet(context, from: _map.camera.center);

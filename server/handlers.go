@@ -95,8 +95,8 @@ func validate(e Event) error {
 	switch {
 	case e.ID == "" || len(e.ID) > 64:
 		return fmt.Errorf("%w: id must be 1-64 characters", errInvalid)
-	case e.Kind != "report" && e.Kind != "vote":
-		return fmt.Errorf("%w: kind must be report or vote", errInvalid)
+	case e.Kind != "report" && e.Kind != "vote" && e.Kind != "credential":
+		return fmt.Errorf("%w: kind must be report, vote or credential", errInvalid)
 	case e.HazardID == "" || e.DeviceID == "":
 		return fmt.Errorf("%w: hazardId and deviceId are required", errInvalid)
 	case e.At.IsZero():
@@ -133,7 +133,24 @@ func (s *Server) getEvents(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "store: %v", err)
 		return
 	}
-	writeJSON(w, map[string]any{"events": events, "cursor": next})
+	// Apps list the event kinds they can read. Apps from before that
+	// parameter existed (0.1-0.3) crash on a kind they don't know, so they
+	// only ever get reports and votes. The cursor still advances past
+	// anything filtered out.
+	kinds := map[string]bool{"report": true, "vote": true}
+	if raw := r.URL.Query().Get("kinds"); raw != "" {
+		kinds = map[string]bool{}
+		for _, k := range strings.Split(raw, ",") {
+			kinds[k] = true
+		}
+	}
+	readable := events[:0:0]
+	for _, e := range events {
+		if kinds[e.Kind] {
+			readable = append(readable, e)
+		}
+	}
+	writeJSON(w, map[string]any{"events": readable, "cursor": next})
 }
 
 func parseBBox(raw string) (BBox, error) {

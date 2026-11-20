@@ -4,6 +4,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../map/hazard_marker.dart';
+import '../reputation/achievement_badge.dart';
+import '../reputation/achievements.dart';
 import '../settings/app_settings.dart';
 import '../theme/motion.dart';
 import 'effects/nuclear_view.dart';
@@ -567,6 +569,7 @@ class _HazardDetailsSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
+          _ReporterRow(hazard: hazard, mine: mine),
           if (mine)
             const Text('You reported this. Others nearby need to confirm it.')
           else
@@ -600,3 +603,34 @@ class _HazardDetailsSheet extends StatelessWidget {
     );
   }
 }
+
+/// Who reported it and how reliable they have been, so people can weigh a
+/// report before acting on it.
+class _ReporterRow extends StatelessWidget {
+  const _ReporterRow({required this.hazard, required this.mine});
+
+  final Hazard hazard;
+  final bool mine;
+
+  @override
+  Widget build(BuildContext context) {
+    if (hazard.official) return const SizedBox.shrink();
+    final record = context.watch<HazardRepository>().recordFor(hazard.reportedBy);
+    final tier = Tier.of(record);
+    final who = mine
+        ? 'you'
+        : record.settledReports == 0
+            ? 'a new reporter'
+            : 'a ${tier.label.toLowerCase()}';
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: AchievementBadge(icon: tier.icon, color: tier.color, size: 36, animate: false),
+      title: Text('Reported by $who'),
+      subtitle: Text([
+        if (record.goodReports > 0) '${record.goodReports} report${record.goodReports == 1 ? '' : 's'} held up',
+        'counts ${record.multiplier.toStringAsFixed(1)}×',
+      ].join(' · ')),
+    );
+  }
+}
+

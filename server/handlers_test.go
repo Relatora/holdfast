@@ -147,3 +147,30 @@ func TestRegionFilesRejectTraversal(t *testing.T) {
 		}
 	}
 }
+
+func TestCredentialsOnlyReachAppsThatAskForThem(t *testing.T) {
+	ts, _ := newTestServer(t)
+	credential := `{"id":"c1","kind":"credential","hazardId":"credential:a","deviceId":"a",
+  "at":"2026-11-20T12:00:00Z","payload":{"type":"training"}}`
+	resp := post(t, ts.URL, `{"events":[`+report+`,`+credential+`]}`)
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		t.Fatalf("POST: %d", resp.StatusCode)
+	}
+
+	count := func(query string) int {
+		resp, err := http.Get(ts.URL + "/v1/events?since=0" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(decode[struct {
+			Events []Event `json:"events"`
+		}](t, resp).Events)
+	}
+	if n := count(""); n != 1 {
+		t.Errorf("an old app (no kinds) got %d events, want only the report", n)
+	}
+	if n := count("&kinds=report,vote,credential"); n != 2 {
+		t.Errorf("a new app got %d events, want 2", n)
+	}
+}

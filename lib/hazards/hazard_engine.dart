@@ -110,10 +110,18 @@ double voteWeight(HazardVote vote, HazardPolicy policy) {
 /// 4. Enough weighted "it's gone" votes, outnumbering confirmations, clear it.
 /// 5. Any "it's gone" vote short of that marks it disputed.
 /// 6. Official hazards, or enough weighted confirmations, verify it.
+///
+/// [reputation], when given, scales each device's votes by its track record
+/// (see `reputation.dart`): a reliable reporter's "still there" or "it's
+/// gone" counts up to twice, a poor one's half. A reliable reporter's own
+/// report also counts for part of a confirmation. Without it, every device
+/// weighs the same, which is how outcomes are judged when building the
+/// reputation itself (so it can't feed on itself).
 HazardAssessment assessHazard(
   Hazard hazard,
   DateTime now, {
   HazardPolicy policy = HazardPolicy.standard,
+  double Function(String deviceId)? reputation,
 }) {
   // Rule 1 and 2: keep only the most recent vote per independent device.
   final latestByDevice = <String, HazardVote>{};
@@ -126,11 +134,12 @@ HazardAssessment assessHazard(
     }
   }
 
-  var confirmWeight = 0.0;
+  // A trusted reporter's report starts with part of a confirmation.
+  var confirmWeight = reputation == null ? 0.0 : math.max(0.0, (reputation(hazard.reportedBy) - 1) * 0.5);
   var clearWeight = 0.0;
   var lastActivity = hazard.reportedAt;
   for (final vote in latestByDevice.values) {
-    final weight = voteWeight(vote, policy);
+    final weight = voteWeight(vote, policy) * (reputation?.call(vote.deviceId) ?? 1.0);
     if (vote.kind == VoteKind.confirm) {
       confirmWeight += weight;
       if (vote.at.isAfter(lastActivity)) lastActivity = vote.at;

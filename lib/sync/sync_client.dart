@@ -38,7 +38,9 @@ class SyncClient {
   /// cursor to pass next time.
   Future<({List<HazardEvent> events, int cursor})> pull(int cursor) async {
     final response = await _client
-        .get(Uri.parse('$baseUrl/v1/events?since=$cursor'))
+        // `kinds` tells the server which event kinds this version can read;
+        // without it the server sends only reports and votes (older apps).
+        .get(Uri.parse('$baseUrl/v1/events?since=$cursor&kinds=${HazardEventKind.supported}'))
         .timeout(_timeout);
     if (response.statusCode != 200) {
       throw http.ClientException('pull failed: HTTP ${response.statusCode}');
@@ -47,7 +49,7 @@ class SyncClient {
     return (
       events: [
         for (final e in body['events']! as List<Object?>)
-          HazardEvent.fromJson((e! as Map).cast<String, Object?>()),
+          ?HazardEvent.tryFromJson((e! as Map).cast<String, Object?>()),
       ],
       cursor: (body['cursor']! as num).toInt(),
     );
