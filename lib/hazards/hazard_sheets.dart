@@ -4,12 +4,15 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../map/hazard_marker.dart';
+import '../settings/app_settings.dart';
 import '../theme/motion.dart';
 import 'effects/nuclear_view.dart';
+import 'effects/spread.dart';
 import 'hazard.dart';
 import 'hazard_details.dart';
 import 'hazard_engine.dart';
 import 'hazard_repository.dart';
+import 'wind_service.dart';
 
 /// Bottom sheet for reporting a hazard at a map position.
 ///
@@ -55,6 +58,27 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
   bool _withWind = false;
   double _windFrom = 270;
   double _windKmh = 15;
+  WindSource _windSource = WindSource.manual;
+  bool _fetchingWind = false;
+
+  Future<void> _useCurrentWind() async {
+    setState(() => _fetchingWind = true);
+    final wind = await WindService().current(widget.latitude, widget.longitude);
+    if (!mounted) return;
+    setState(() {
+      _fetchingWind = false;
+      if (wind != null) {
+        _windFrom = wind.fromDegrees;
+        _windKmh = wind.speedKmh.clamp(0, 100).toDouble();
+        _windSource = WindSource.forecast;
+      }
+    });
+    if (wind == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't get the wind (no connection?). Enter it by hand.")),
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -76,7 +100,9 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
   bool get _ready => _type != null && (_type != HazardType.nuclearDetonation || _yieldKt != null);
 
   Map<String, Object?> _buildDetails(HazardType type) => hazardDetails(
-        wind: type.spreadsWithWind && _withWind ? Wind(fromDegrees: _windFrom, speedKmh: _windKmh) : null,
+        wind: type.spreadsWithWind && _withWind
+            ? Wind(fromDegrees: _windFrom, speedKmh: _windKmh, source: _windSource)
+            : null,
         radiation: type == HazardType.radiation
             ? RadiationDetails(level: _radiation, reading: double.tryParse(_reading.text.trim().replaceAll(',', '.')))
             : null,
@@ -331,6 +357,18 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
         onChanged: (v) => setState(() => _withWind = v),
       ),
       if (_withWind) ...[
+        if (context.watch<AppSettings>().fetchWind)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: _fetchingWind ? null : _useCurrentWind,
+              icon: _fetchingWind
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.cloud_download_outlined),
+              label: Text(_windSource == WindSource.forecast ? 'Current wind filled in' : 'Use current wind'),
+            ),
+          ),
+        const SizedBox(height: 8),
         Text('Blowing from', style: theme.textTheme.labelLarge),
         const SizedBox(height: 6),
         Wrap(
@@ -341,7 +379,10 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
               ChoiceChip(
                 label: Text(label),
                 selected: wind.fromCompass == label,
-                onSelected: (_) => setState(() => _windFrom = i * 45.0),
+                onSelected: (_) => setState(() {
+                  _windFrom = i * 45.0;
+                  _windSource = WindSource.manual;
+                }),
               ),
           ],
         ),
@@ -352,7 +393,10 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
           max: 100,
           divisions: 20,
           label: '${_windKmh.round()} km/h',
-          onChanged: (v) => setState(() => _windKmh = v),
+          onChanged: (v) => setState(() {
+            _windKmh = v;
+            _windSource = WindSource.manual;
+          }),
         ),
       ],
     ];
@@ -385,6 +429,29 @@ List<Widget> _detailRows(Hazard hazard, ThemeData theme) {
               '${radiation.reading != null ? '${radiation.reading} µSv/h measured' : radiation.level.range}'),
           subtitle: Text(radiation.level.advice),
         ),
+      ),
+    if (spreadPlumes(hazard) case final plumes when plumes.isNotEmpty)
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.blur_on_rounded),
+        title: Text('Likely spread: ${[
+          for (final p in plumes) '${p.hours} h → ${(p.lengthMeters / 1000).toStringAsFixed(p.lengthMeters < 10000 ? 1 : 0)} km'
+        ].join(', ')}'),
+        subtitle: const Text('Downwind, widening as it goes. An estimate: terrain and weather change it.'),
+      ),
+    if (hazard.type == HazardType.tsunami)
+      const ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.landscape_rounded),
+        title: Text('Move to high ground or inland now'),
+        subtitle: Text('Tsunamis come in several waves over hours. Stay away from the coast until officials give the all-clear.'),
+      ),
+    if (hazard.type == HazardType.lava)
+      const ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.landscape_rounded),
+        title: Text('Lava follows valleys and low ground'),
+        subtitle: Text('Keep to higher ground and away from its downhill path. Gases near it can be deadly.'),
       ),
     if (wind != null)
       ListTile(

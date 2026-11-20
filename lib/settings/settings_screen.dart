@@ -44,6 +44,16 @@ class SettingsScreen extends StatelessWidget {
           ),
           const _Header('Hazards'),
           SwitchListTile(
+            secondary: const Icon(Icons.air_rounded),
+            title: const Text('Fetch wind for hazards'),
+            subtitle: const Text(
+              'When online, "Use current wind" asks Open-Meteo for the wind at a hazard. '
+              'Only the hazard\'s position is sent.',
+            ),
+            value: settings.fetchWind,
+            onChanged: (value) => settings.fetchWind = value,
+          ),
+          SwitchListTile(
             secondary: const Icon(Icons.hourglass_top_rounded),
             title: const Text('Show unverified reports'),
             subtitle: const Text('Reports nobody else has confirmed yet, drawn dashed.'),

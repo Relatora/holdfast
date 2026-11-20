@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../hazards/effects/nuclear_effects.dart';
+import '../hazards/effects/spread.dart';
 import '../hazards/hazard.dart';
 import '../hazards/hazard_details.dart';
 import 'router.dart';
@@ -36,8 +37,11 @@ double avoidRadiusMeters(HazardType type) => switch (type) {
     };
 
 List<Avoid> avoidAreas(Iterable<Hazard> hazards) => [
-      for (final h in hazards)
+      for (final h in hazards) ...[
         if (_radiusFor(h) > 0) Avoid(LatLng(h.latitude, h.longitude), _radiusFor(h)),
+        // Where smoke, gas, ash or fallout is likely to be within 3 hours.
+        for (final c in plumeCircles(h)) Avoid(c.center, c.radius),
+      ],
     ];
 
 /// A nuclear detonation with a known yield is avoided out to the furthest
