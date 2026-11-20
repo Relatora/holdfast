@@ -157,6 +157,26 @@ void main() {
       expect(plan.legs[3].steps.first.instruction, 'Board at Junction B');
     });
 
+    test('changes lines inside one station that serves both', () {
+      final b = town();
+      // Two lines meet at Hub without sharing track (like Bayview): the
+      // station sits between them, within reach of both.
+      final a1 = b.vertex(45.0004, -75.0004), a2 = b.vertex(45.0500, -75.0010);
+      final b1 = b.vertex(45.0500, -74.9990), b2 = b.vertex(45.1000, -74.9990);
+      final d1 = b.vertex(45.1001, -74.9987), d2 = b.vertex(45.1010, -74.9987);
+      b
+        ..edge(a1, a2, modes: ModeBits.rail, cls: RoadClass.rail)
+        ..edge(b1, b2, modes: ModeBits.rail, cls: RoadClass.rail)
+        ..edge(d1, d2, name: 'Last St')
+        ..station('Alpha', 45.0003, -75.0003)
+        ..station('Hub', 45.0500, -75.0000)
+        ..station('Omega', 45.1001, -74.9990);
+
+      final plan = routerFor(b).plan(sw, const LatLng(45.1010, -74.9987), TravelMode.train);
+      expect(plan.legs.where((l) => l.kind == LegKind.rail), hasLength(2));
+      expect(plan.steps.map((s) => s.instruction), contains('Change trains at Hub'));
+    });
+
     test('a map without stations says so', () {
       expect(
         () => routerFor(town()).plan(sw, ne, TravelMode.train),
@@ -190,15 +210,13 @@ void main() {
     expect(plan.legs[1].meters, greaterThan(8000));
   }, skip: ottawa.existsSync() ? false : 'run tool/build_routing.py ottawa first');
 
-  test('real Ottawa pack: Line 1 to Line 2 changes trains', () {
+  test('real Ottawa pack: Line 1 to Line 2 changes trains at Bayview', () {
     final router = Router(RoutingGraph.decode(ottawa.readAsBytesSync()));
-    // Tunney's Pasture (Line 1) to Greenboro (Line 2): the lines only meet
-    // at Bayview, by a walk between platforms.
-    const tunneys = LatLng(45.4036, -75.7352), greenboro = LatLng(45.3600, -75.6593);
-    final plan = router.plan(tunneys, greenboro, TravelMode.train);
-    final rides = plan.legs.where((l) => l.kind == LegKind.rail).toList();
-    expect(rides, hasLength(2));
-    // ignore: avoid_print
-    print([for (final s in plan.steps) s.instruction].where((s) => !s.startsWith('Head') && !s.contains('onto')).join(' | '));
+    // Blair (east end of Line 1) to Greenboro (Line 2): the lines share no
+    // track and meet only at Bayview, one station with two platforms.
+    const blair = LatLng(45.4310, -75.6086), greenboro = LatLng(45.3600, -75.6593);
+    final plan = router.plan(blair, greenboro, TravelMode.train);
+    expect(plan.legs.where((l) => l.kind == LegKind.rail), hasLength(2));
+    expect(plan.steps.map((s) => s.instruction), contains('Change trains at Bayview'));
   }, skip: ottawa.existsSync() ? false : 'run tool/build_routing.py ottawa first');
 }

@@ -156,7 +156,9 @@ class Router {
 
     List<(Station, int)> nearest(LatLng point) {
       final sorted = [...usable]..sort((a, b) => _metres(point, a.$1.position).compareTo(_metres(point, b.$1.position)));
-      return sorted.take(3).where((s) => _metres(point, s.$1.position) < 8000).toList();
+      // Four entries, not three: a station served by two lines appears
+      // once per line.
+      return sorted.take(4).where((s) => _metres(point, s.$1.position) < 8000).toList();
     }
 
     final origins = nearest(from), destinations = nearest(to);
@@ -210,7 +212,7 @@ class Router {
             consider([
               walkIn,
               ride(board, change),
-              walk(change.$1.position, onward.$1.position),
+              identical(change.$1, onward.$1) ? _platformChange(change.$1) : walk(change.$1.position, onward.$1.position),
               ride(onward, alight),
               walkOut,
             ]);
@@ -227,13 +229,46 @@ class Router {
   /// Furthest apart two stations can be and still count as a change of line.
   static const maxTransferMeters = 500.0;
 
+  /// Changing lines inside one station (two lines, two platforms, no
+  /// shared track): a short walk between platforms.
+  RouteLeg _platformChange(Station station) => RouteLeg(
+        kind: LegKind.walk,
+        points: [station.position],
+        meters: 0,
+        duration: const Duration(minutes: 3),
+        steps: [
+          RouteStep(
+            instruction: 'Change trains at ${station.name}',
+            meters: 0,
+            turn: Turn.straight,
+            at: station.position,
+          ),
+        ],
+      );
+
   List<(Station, int)>? _stations;
 
-  /// Stations paired with the closest rail vertex, if one is within 400 m.
-  List<(Station, int)> _stationVertices() => _stations ??= [
-        for (final station in graph.stations)
-          if (_nearestVertex(station.position, _Profile.rail, within: 400) case final v?) (station, v),
-      ];
+  /// Each station paired with its closest rail vertex on every rail network
+  /// within 400 m: one entry for most stations, two for a station where two
+  /// lines meet without sharing track.
+  List<(Station, int)> _stationVertices() {
+    final existing = _stations;
+    if (existing != null) return existing;
+    final network = _railNetworks();
+    final result = <(Station, int)>[];
+    for (final station in graph.stations) {
+      final best = <int, (int, double)>{};
+      for (final v in _verticesNear(station.position, _Profile.rail, 400)) {
+        final m = _metresV(v, station.position);
+        final current = best[network[v]];
+        if (current == null || m < current.$2) best[network[v]] = (v, m);
+      }
+      for (final (v, _) in best.values) {
+        result.add((station, v));
+      }
+    }
+    return _stations = result;
+  }
 
   Int32List? _networks;
 
@@ -321,6 +356,21 @@ class Router {
   static int _key(double lat, double lon) => ((lat / _cell).floor() << 16) ^ ((lon / _cell).floor() & 0xffff);
 
   int? _nearestVertex(LatLng point, _Profile profile, {double within = maxSnapMeters}) {
+    int? best;
+    var bestMetres = within;
+    for (final v in _verticesNear(point, profile, within)) {
+      final m = _metresV(v, point);
+      if (m < bestMetres) {
+        bestMetres = m;
+        best = v;
+      }
+    }
+    return best;
+  }
+
+  /// Vertices the profile can use in the grid cells around [point]: a
+  /// superset of those within [within] metres.
+  Iterable<int> _verticesNear(LatLng point, _Profile profile, double within) sync* {
     final grid = _grids.putIfAbsent(profile, () {
       final cells = <int, List<int>>{};
       for (var e = 0; e < graph.edgeCount; e++) {
@@ -333,21 +383,11 @@ class Router {
     });
     final rings = (within / 1000 / (_cell * 111)).ceil() + 1;
     final baseLat = (point.latitude / _cell).floor(), baseLon = (point.longitude / _cell).floor();
-    int? best;
-    var bestMetres = within;
     for (var dLat = -rings; dLat <= rings; dLat++) {
       for (var dLon = -rings; dLon <= rings; dLon++) {
-        final key = ((baseLat + dLat) << 16) ^ ((baseLon + dLon) & 0xffff);
-        for (final v in grid[key] ?? const <int>[]) {
-          final m = _metresV(v, point);
-          if (m < bestMetres) {
-            bestMetres = m;
-            best = v;
-          }
-        }
+        yield* grid[((baseLat + dLat) << 16) ^ ((baseLon + dLon) & 0xffff)] ?? const <int>[];
       }
     }
-    return best;
   }
 
   // ---- Hazards -------------------------------------------------------------
