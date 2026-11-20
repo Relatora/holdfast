@@ -9,8 +9,10 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../hazards/hazard_engine.dart';
+import '../hazards/hazard_filter.dart';
 import '../hazards/hazard_repository.dart';
 import '../hazards/hazard_sheets.dart';
+import '../hazards/hazards_sheet.dart';
 import '../map/basemap_layer.dart';
 import '../map/hazard_marker.dart';
 import '../map/poi_marker.dart';
@@ -328,6 +330,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (!_visiblePois.contains(poi)) setState(() => _visiblePois = [..._visiblePois, poi]);
   }
 
+  // ---- Hazards ---------------------------------------------------------------
+
+  Future<void> _openHazards() async {
+    final hazard = await showHazardsSheet(context, from: _map.camera.center);
+    if (hazard == null || !mounted) return;
+    _flyTo(LatLng(hazard.latitude, hazard.longitude), math.max(_map.camera.zoom, 14));
+    showHazardDetailsSheet(context, hazard.id);
+  }
+
   // ---- Directions ------------------------------------------------------------
 
   /// Hazards currently shown on the map, as areas a route should avoid.
@@ -412,9 +423,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final animate = Motion.enabled(context);
     final active = regions.activeRegion;
 
+    final shownCategories = settings.hazardCategories;
     final hazards = [
       for (final hazard in hazardsRepo.hazards)
-        if (isVisible(hazardsRepo.assess(hazard), showUnverified: settings.showUnverifiedHazards))
+        if (isVisible(hazardsRepo.assess(hazard), showUnverified: settings.showUnverifiedHazards) &&
+            passesFilter(hazard, shownCategories))
           (hazard: hazard, assessment: hazardsRepo.assess(hazard)),
     ];
 
@@ -526,6 +539,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   tooltip: 'Maps',
                   onPressed: _openRegions,
                   child: const Icon(Icons.layers_rounded),
+                ),
+                const SizedBox(height: 10),
+                FloatingActionButton.small(
+                  heroTag: 'hazards',
+                  tooltip: shownCategories.isEmpty ? 'Hazards' : 'Hazards (filtered)',
+                  onPressed: _openHazards,
+                  child: Badge(
+                    // A dot when the map is filtered, so hidden hazards are
+                    // never a surprise; otherwise the count on the map.
+                    isLabelVisible: hazards.isNotEmpty || shownCategories.isNotEmpty,
+                    label: shownCategories.isEmpty ? Text('${hazards.length}') : null,
+                    smallSize: 9,
+                    child: const Icon(Icons.warning_amber_rounded),
+                  ),
                 ),
                 const SizedBox(height: 10),
                 ZoomButtons(onZoomIn: () => _zoomBy(1), onZoomOut: () => _zoomBy(-1)),

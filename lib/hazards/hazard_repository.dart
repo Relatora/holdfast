@@ -86,6 +86,7 @@ class HazardRepository extends ChangeNotifier {
     required double latitude,
     required double longitude,
     String description = '',
+    Map<String, Object?> details = const {},
   }) async {
     final hazard = Hazard(
       id: _uuid.v4(),
@@ -96,6 +97,7 @@ class HazardRepository extends ChangeNotifier {
       description: description.trim(),
       reportedBy: deviceId,
       reportedAt: now.toUtc(),
+      details: details,
     );
     await _record(HazardEvent.report(_uuid.v4(), hazard));
     return hazard;

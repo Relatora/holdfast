@@ -14,12 +14,20 @@ import 'routing_graph.dart';
 /// How far around a hazard a route should stay, by type. Floods, fires and
 /// chemical spills cover an area; a downed line or a collapse blocks a
 /// street. Contaminated water doesn't affect travel at all.
+///
+/// The nuclear and radiation figures are a floor: once effect rings and
+/// wind plumes exist for a report, those shapes are avoided as well.
 double avoidRadiusMeters(HazardType type) => switch (type) {
-      HazardType.fire || HazardType.chemicalSpill => 500,
+      HazardType.nuclearDetonation => 5000,
+      HazardType.volcanicAsh => 2000,
+      HazardType.tsunami => 1500,
+      HazardType.radiation => 1000,
+      HazardType.fire || HazardType.chemicalSpill || HazardType.lava => 500,
       HazardType.flood || HazardType.gasLeak => 300,
       HazardType.unrest => 250,
+      HazardType.police || HazardType.other => 100,
       HazardType.powerLines || HazardType.structuralCollapse => 60,
-      HazardType.roadBlocked => 40,
+      HazardType.roadBlocked || HazardType.peopleHurt => 40,
       HazardType.contaminatedWater => 0,
     };
 

@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../hazards/hazard.dart';
+import '../hazards/hazard_details.dart';
 import '../hazards/hazard_engine.dart';
 import '../theme/app_theme.dart';
 
@@ -19,6 +20,14 @@ extension HazardTypeStyle on HazardType {
         HazardType.structuralCollapse => Icons.domain_disabled_rounded,
         HazardType.unrest => Icons.groups_rounded,
         HazardType.contaminatedWater => Icons.water_damage_rounded,
+        HazardType.police => Icons.local_police_rounded,
+        HazardType.peopleHurt => Icons.personal_injury_rounded,
+        HazardType.volcanicAsh => Icons.cloud_rounded,
+        HazardType.lava => Icons.volcano_rounded,
+        HazardType.tsunami => Icons.tsunami_rounded,
+        HazardType.nuclearDetonation => Icons.brightness_7_rounded,
+        HazardType.radiation => Icons.warning_amber_rounded,
+        HazardType.other => Icons.report_rounded,
       };
 
   Color get color => switch (this) {
@@ -31,6 +40,39 @@ extension HazardTypeStyle on HazardType {
         HazardType.structuralCollapse => const Color(0xFF8D6E63),
         HazardType.unrest => AppTheme.danger,
         HazardType.contaminatedWater => const Color(0xFF00A3A3),
+        HazardType.police => const Color(0xFF3D5AFE),
+        HazardType.peopleHurt => const Color(0xFFE53970),
+        HazardType.volcanicAsh => const Color(0xFF78909C),
+        HazardType.lava => const Color(0xFFD84315),
+        HazardType.tsunami => const Color(0xFF0277BD),
+        HazardType.nuclearDetonation => const Color(0xFFB71C1C),
+        HazardType.radiation => const Color(0xFFC6A700),
+        HazardType.other => const Color(0xFF757575),
+      };
+}
+
+/// Traffic-light colours for radiation levels, darkest for the worst.
+extension RadiationLevelStyle on RadiationLevel {
+  Color get color => switch (this) {
+        RadiationLevel.normal => const Color(0xFF43A047),
+        RadiationLevel.elevated => const Color(0xFFC0CA33),
+        RadiationLevel.high => const Color(0xFFFFA000),
+        RadiationLevel.veryHigh => const Color(0xFFE64A19),
+        RadiationLevel.dangerous => const Color(0xFF8E24AA),
+      };
+}
+
+/// Icon for each hazard category, used by the report sheet and filters.
+extension HazardCategoryStyle on HazardCategory {
+  IconData get icon => switch (this) {
+        HazardCategory.fire => Icons.local_fire_department_rounded,
+        HazardCategory.water => Icons.water_rounded,
+        HazardCategory.transport => Icons.traffic_rounded,
+        HazardCategory.utilities => Icons.bolt_rounded,
+        HazardCategory.chemical => Icons.science_rounded,
+        HazardCategory.geological => Icons.landslide_rounded,
+        HazardCategory.people => Icons.groups_rounded,
+        HazardCategory.other => Icons.report_rounded,
       };
 }
 

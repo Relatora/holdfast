@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../hazards/hazard.dart';
 import '../theme/app_theme_mode.dart';
 
 /// User preferences that survive restarts, exposed as a [ChangeNotifier] so
@@ -29,6 +30,7 @@ class AppSettings extends ChangeNotifier {
   static const _kBatterySaver = 'batterySaver';
   static const _kOnboardingDismissed = 'onboardingDismissed';
   static const _kShowUnverified = 'showUnverifiedHazards';
+  static const _kHazardCategories = 'hazardCategories';
   static const _kDeviceId = 'deviceId';
 
   final SharedPreferences _prefs;
@@ -68,6 +70,18 @@ class AppSettings extends ChangeNotifier {
   bool get showUnverifiedHazards => _prefs.getBool(_kShowUnverified) ?? false;
   set showUnverifiedHazards(bool value) {
     _prefs.setBool(_kShowUnverified, value);
+    notifyListeners();
+  }
+
+  /// Hazard categories shown on the map; empty means every category. A
+  /// shortlist, so someone tracking floods isn't wading through every
+  /// police report. Directions still avoid hazards that are filtered out.
+  Set<HazardCategory> get hazardCategories => {
+        for (final name in _prefs.getStringList(_kHazardCategories) ?? const <String>[])
+          ?HazardCategory.values.asNameMap()[name],
+      };
+  set hazardCategories(Set<HazardCategory> value) {
+    _prefs.setStringList(_kHazardCategories, [for (final c in value) c.name]);
     notifyListeners();
   }
 }

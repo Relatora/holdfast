@@ -7,29 +7,76 @@
 /// can exercise with a fake clock.
 library;
 
+/// How hazards are grouped, so a report starts with "what kind of thing"
+/// and a map can be filtered down to what matters to you.
+enum HazardCategory {
+  fire('Fire & explosion'),
+  water('Water & weather'),
+  transport('Roads & buildings'),
+  utilities('Utilities'),
+  chemical('Chemical & radiological'),
+  geological('Volcanic & geological'),
+  people('People & security'),
+  other('Other');
+
+  const HazardCategory(this.label);
+  final String label;
+
+  List<HazardType> get types => [for (final t in HazardType.values) if (t.category == this) t];
+}
+
 /// The kinds of hazard people can report, each with a default lifetime.
 ///
 /// The lifetime is how long a report stays on the map after the last sign of
 /// life (the original report or the latest "still there" confirmation). A
-/// roadblock is usually gone within hours; a wildfire burns for days.
+/// roadblock is usually gone within hours; a lava flow for weeks; fallout
+/// and radiation for longer than any of them.
+///
+/// The names are stored in synced events, so they never change; new types
+/// are only ever added.
 enum HazardType {
-  fire('Fire', Duration(days: 7)),
-  flood('Flood', Duration(hours: 72)),
-  roadBlocked('Road blocked', Duration(hours: 12)),
-  powerLines('Downed power lines', Duration(hours: 24)),
-  gasLeak('Gas leak', Duration(hours: 12)),
-  chemicalSpill('Chemical spill', Duration(hours: 48)),
-  structuralCollapse('Structural collapse', Duration(days: 7)),
-  unrest('Unrest', Duration(hours: 6)),
-  contaminatedWater('Contaminated water', Duration(days: 5));
+  fire('Fire', Duration(days: 7), HazardCategory.fire),
+  flood('Flood', Duration(hours: 72), HazardCategory.water),
+  roadBlocked('Road blocked', Duration(hours: 12), HazardCategory.transport),
+  powerLines('Downed power lines', Duration(hours: 24), HazardCategory.utilities),
+  gasLeak('Gas leak', Duration(hours: 12), HazardCategory.utilities),
+  chemicalSpill('Chemical spill', Duration(hours: 48), HazardCategory.chemical),
+  structuralCollapse('Structural collapse', Duration(days: 7), HazardCategory.transport),
+  unrest('Unrest', Duration(hours: 6), HazardCategory.people),
+  contaminatedWater('Contaminated water', Duration(days: 5), HazardCategory.water),
+  police('Police activity', Duration(hours: 6), HazardCategory.people),
+  peopleHurt('People hurt', Duration(hours: 6), HazardCategory.people),
+  volcanicAsh('Volcanic ash', Duration(days: 3), HazardCategory.geological),
+  lava('Lava flow', Duration(days: 14), HazardCategory.geological),
+  tsunami('Tsunami', Duration(hours: 24), HazardCategory.water),
+  nuclearDetonation('Nuclear detonation', Duration(days: 30), HazardCategory.chemical),
+  radiation('Radiation', Duration(days: 14), HazardCategory.chemical),
 
-  const HazardType(this.label, this.lifetime);
+  /// A type this version of the app doesn't know (sent by a newer one).
+  /// Shown as a generic hazard rather than mislabelled.
+  other('Other hazard', Duration(hours: 12), HazardCategory.other);
+
+  const HazardType(this.label, this.lifetime, this.category);
 
   final String label;
   final Duration lifetime;
+  final HazardCategory category;
+
+  /// Hazards whose danger drifts with the wind, for which a report can
+  /// include wind and the map can draw a spread pattern.
+  bool get spreadsWithWind => switch (this) {
+        HazardType.fire ||
+        HazardType.gasLeak ||
+        HazardType.chemicalSpill ||
+        HazardType.volcanicAsh ||
+        HazardType.nuclearDetonation ||
+        HazardType.radiation =>
+          true,
+        _ => false,
+      };
 
   static HazardType parse(String name) =>
-      HazardType.values.firstWhere((t) => t.name == name, orElse: () => HazardType.roadBlocked);
+      HazardType.values.firstWhere((t) => t.name == name, orElse: () => HazardType.other);
 }
 
 /// How dangerous the reporter judged the hazard to be. Drives marker size,
@@ -106,6 +153,7 @@ class Hazard {
     this.description = '',
     this.official = false,
     this.votes = const [],
+    this.details = const {},
   });
 
   final String id;
@@ -126,6 +174,11 @@ class Hazard {
 
   final List<HazardVote> votes;
 
+  /// Type-specific extras: a nuclear detonation's yield, a radiation
+  /// level, the wind. Kept as JSON here and read through the typed views in
+  /// `hazard_details.dart`, so unknown keys from newer apps survive a sync.
+  final Map<String, Object?> details;
+
   Hazard withVote(HazardVote vote) => Hazard(
         id: id,
         type: type,
@@ -137,6 +190,7 @@ class Hazard {
         reportedAt: reportedAt,
         official: official,
         votes: [...votes, vote],
+        details: details,
       );
 
   Map<String, Object?> toJson() => {
@@ -149,6 +203,7 @@ class Hazard {
         'reportedBy': reportedBy,
         'reportedAt': reportedAt.toUtc().toIso8601String(),
         'official': official,
+        if (details.isNotEmpty) 'details': details,
         'votes': [for (final v in votes) v.toJson()],
       };
 
@@ -162,6 +217,7 @@ class Hazard {
         reportedBy: json['reportedBy']! as String,
         reportedAt: DateTime.parse(json['reportedAt']! as String),
         official: (json['official'] as bool?) ?? false,
+        details: ((json['details'] as Map?) ?? const {}).cast<String, Object?>(),
         votes: [
           for (final v in (json['votes'] as List<Object?>?) ?? const [])
             HazardVote.fromJson((v! as Map).cast<String, Object?>()),
