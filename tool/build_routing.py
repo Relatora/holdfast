@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import math
 import sys
@@ -112,8 +113,10 @@ def overpass(query: str, timeout: int = 600, rounds: int = 7) -> dict:
             try:
                 with urllib.request.urlopen(request, timeout=timeout) as response:
                     return json.load(response)
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-                print(f"  {url}: {error}", flush=True)
+            # A dropped connection mid-download (IncompleteRead) is as
+            # retryable as a busy server.
+            except (urllib.error.URLError, http.client.HTTPException, OSError, json.JSONDecodeError) as error:
+                print(f"  {url}: {error!r:.200}", flush=True)
         wait = min(300, 20 * 2 ** round_)
         print(f"  every server is busy; trying again in {wait} s", flush=True)
         time.sleep(wait)
