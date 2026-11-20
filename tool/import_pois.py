@@ -91,8 +91,9 @@ def fetch(query: str) -> list[dict]:
             with urllib.request.urlopen(request, timeout=240) as response:
                 return json.load(response)["elements"]
         except urllib.error.HTTPError as error:
-            # 429/504 mean the shared server is busy; back off and retry.
-            if error.code in (429, 504) and attempt < 2:
+            # 429 and 502-504 mean the shared server is busy or restarting;
+            # back off and retry.
+            if error.code in (429, 502, 503, 504) and attempt < 2:
                 time.sleep(30 * (attempt + 1))
                 continue
             raise
@@ -134,6 +135,8 @@ def to_poi(element: dict) -> dict | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("region", help="region id from assets/regions/catalog.json")
+    parser.add_argument("--out-dir", type=Path, default=OUT_DIR,
+                        help="where to write <id>.pois.json (default: regions/ in the repo)")
     args = parser.parse_args()
 
     regions = json.loads(CATALOG.read_text(encoding="utf-8"))["regions"]
@@ -147,16 +150,19 @@ def main() -> None:
     pois = [p for p in (to_poi(e) for e in elements) if p]
     pois.sort(key=lambda p: (p["cat"], p["name"]))
 
-    OUT_DIR.mkdir(exist_ok=True)
-    target = OUT_DIR / f"{region['id']}.pois.json"
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    target = args.out_dir / f"{region['id']}.pois.json"
+    partial = target.with_name(target.name + ".part")
     pack = {
         "region": region["id"],
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "attribution": "© OpenStreetMap contributors, ODbL 1.0",
         "pois": pois,
     }
-    target.write_text(json.dumps(pack, ensure_ascii=False, separators=(",", ":")),
-                      encoding="utf-8")
+    # Written aside and renamed, so the server never serves half a pack.
+    partial.write_text(json.dumps(pack, ensure_ascii=False, separators=(",", ":")),
+                       encoding="utf-8")
+    partial.replace(target)
 
     counts: dict[str, int] = {}
     for poi in pois:

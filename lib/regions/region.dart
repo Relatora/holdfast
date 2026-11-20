@@ -7,14 +7,19 @@ import 'package:latlong2/latlong.dart';
 
 /// How big a region is. People pick a level first, then a region in it.
 enum RegionLevel {
-  city('Cities', 'A metro area. Quick to download.'),
-  province('Provinces & states', 'Good for a road trip or evacuation.'),
-  country('Countries', 'Plan for several gigabytes.'),
-  continent('Continents', 'Tens of gigabytes. Desktop or large phones.'),
-  world('Whole world', 'The full planet. Over 100 GB.');
+  city('Cities', 'City', 'A metro area. Quick to download.'),
+  province('Provinces & states', 'Province/state', 'Good for a road trip or evacuation.'),
+  country('Countries', 'Country', 'Plan for several gigabytes.'),
+  continent('Continents', 'Continent', 'Tens of gigabytes. Desktop or large phones.'),
+  world('Whole world', 'Whole world', 'The full planet. Over 100 GB.');
 
-  const RegionLevel(this.label, this.hint);
+  const RegionLevel(this.label, this.singular, this.hint);
+
+  /// Tab title.
   final String label;
+
+  /// Names one region in a mixed list: "City in Ontario".
+  final String singular;
   final String hint;
 }
 

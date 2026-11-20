@@ -6,16 +6,37 @@ import '../theme/motion.dart';
 import 'region.dart';
 import 'region_store.dart';
 
-/// "My maps": browse regions by size (city → whole world), download,
-/// switch between, and delete them.
-class RegionsScreen extends StatelessWidget {
+/// "Maps": what's on this device, then every region by size (city → whole
+/// world), with a search across all of them. Download, switch between and
+/// delete maps from here.
+class RegionsScreen extends StatefulWidget {
   const RegionsScreen({super.key});
+
+  @override
+  State<RegionsScreen> createState() => _RegionsScreenState();
+}
+
+class _RegionsScreenState extends State<RegionsScreen> {
+  final _search = TextEditingController();
+
+  /// Opens on "On this device" when there is something there: people
+  /// coming here with maps usually want to switch or tidy up. Without any,
+  /// it opens on Cities, the quickest first download.
+  late final int _initialTab = context.read<RegionStore>().deviceRegions.isEmpty ? 1 : 0;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<RegionStore>();
+    final searching = _search.text.trim().isNotEmpty;
     return DefaultTabController(
-      length: RegionLevel.values.length,
+      length: RegionLevel.values.length + 1,
+      initialIndex: _initialTab,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Maps'),
@@ -26,21 +47,48 @@ class RegionsScreen extends StatelessWidget {
               icon: const Icon(Icons.refresh_rounded),
             ),
           ],
-          bottom: TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: [for (final level in RegionLevel.values) Tab(text: level.label)],
-          ),
+          // While searching, results span every level, so the tabs step aside.
+          bottom: searching
+              ? null
+              : TabBar(
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  tabs: [
+                    Tab(text: 'On this device (${store.deviceRegions.length})'),
+                    for (final level in RegionLevel.values) Tab(text: level.label),
+                  ],
+                ),
         ),
         body: Column(
           children: [
-            const _StatusBanner(),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  for (final level in RegionLevel.values) _RegionList(level: level),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: SearchBar(
+                controller: _search,
+                hintText: 'Search cities, provinces, states, countries…',
+                leading: const Icon(Icons.search_rounded),
+                elevation: const WidgetStatePropertyAll(0),
+                onChanged: (_) => setState(() {}),
+                trailing: [
+                  if (searching)
+                    IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: () => setState(_search.clear),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
                 ],
               ),
+            ),
+            const _StatusBanner(),
+            Expanded(
+              child: searching
+                  ? _SearchResults(query: _search.text)
+                  : TabBarView(
+                      children: [
+                        const _DeviceList(),
+                        for (final level in RegionLevel.values) _RegionList(level: level),
+                      ],
+                    ),
             ),
           ],
         ),
@@ -60,7 +108,13 @@ class _StatusBanner extends StatelessWidget {
         ? (Icons.cloud_off_rounded, "Can't reach the map server. Maps already on this device still work.")
         : !store.files.storesOffline
             ? (Icons.public_rounded, 'Web preview: maps stream from the server. Install the app to keep them offline.')
-            : (Icons.offline_pin_rounded, '${store.readyRegions.length} map(s) stored on this device for offline use.');
+            : store.prepareMaxBytes != null
+                ? (
+                    Icons.cloud_sync_rounded,
+                    'Maps the server hasn\'t built yet are prepared when you ask for them '
+                        '(up to ${formatBytes(store.prepareMaxBytes!)}), then downloaded.',
+                  )
+                : (Icons.offline_pin_rounded, '${store.readyRegions.length} map(s) stored on this device for offline use.');
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -76,6 +130,78 @@ class _StatusBanner extends StatelessWidget {
           Expanded(child: Text(text, style: TextStyle(color: scheme.onSecondaryContainer))),
         ],
       ),
+    );
+  }
+}
+
+/// Maps stored on this device, plus any on their way.
+class _DeviceList extends StatelessWidget {
+  const _DeviceList();
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<RegionStore>();
+    final regions = store.deviceRegions;
+    final theme = Theme.of(context);
+    if (regions.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.download_for_offline_outlined, size: 48, color: theme.colorScheme.primary),
+              const SizedBox(height: 12),
+              Text('No maps on this device yet', style: theme.textTheme.titleMedium),
+              const SizedBox(height: 6),
+              const Text(
+                'Pick one from Cities to start. A city takes a minute; a province can take a while.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final stored = store.readyRegions.fold<int>(0, (sum, r) => sum + store.sizeOf(r));
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+          child: Text(
+            store.files.storesOffline
+                ? '${store.readyRegions.length} map(s), ${formatBytes(stored)} on this device. '
+                    'They work with no network at all.'
+                : 'Maps chosen for streaming in this browser.',
+            style: theme.textTheme.bodyMedium,
+          ),
+        ),
+        for (final region in regions) _RegionTile(region: region, showLevel: true),
+      ],
+    );
+  }
+}
+
+/// Every region matching the search, across all levels.
+class _SearchResults extends StatelessWidget {
+  const _SearchResults({required this.query});
+
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<RegionStore>();
+    final results = store.search(query);
+    if (results.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(32),
+        child: Text('No map matches “${query.trim()}”.', textAlign: TextAlign.center),
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      children: [for (final region in results) _RegionTile(region: region, showLevel: true)],
     );
   }
 }
@@ -117,6 +243,7 @@ class _RegionList extends StatelessWidget {
   }
 }
 
+
 class _GroupHeading extends StatelessWidget {
   const _GroupHeading(this.text);
 
@@ -133,9 +260,13 @@ class _GroupHeading extends StatelessWidget {
 }
 
 class _RegionTile extends StatelessWidget {
-  const _RegionTile({required this.region});
+  const _RegionTile({required this.region, this.showLevel = false});
 
   final Region region;
+
+  /// In mixed lists (search results, On this device) say what kind of
+  /// region it is, since the tab no longer does.
+  final bool showLevel;
 
   /// Anything this big gets an "are you sure" with the size spelled out.
   static const _bigDownload = 5000000000; // 5 GB
@@ -151,6 +282,7 @@ class _RegionTile extends StatelessWidget {
           content: Text(
             '${region.name} is a large map. Use Wi-Fi, keep the device charging, '
             'and make sure there is at least ${formatBytes((size * 1.1).round())} free. '
+            '${store.isHosted(region) ? '' : 'The server prepares it first, which can take a while. '}'
             'If the download stops, it continues from where it left off.',
           ),
           actions: [
@@ -172,18 +304,32 @@ class _RegionTile extends StatelessWidget {
     final isActive = store.activeRegion?.id == region.id;
     final parent = store.byId(region.parentId);
     final size = '${store.isEstimate(region) ? '≈ ' : ''}${formatBytes(store.sizeOf(region))}';
+    final where = [if (showLevel) region.level.singular, ?parent?.name].join(' in ');
 
     final subtitle = switch (state.phase) {
       RegionPhase.downloading =>
         '${formatBytes(state.received)} of ${formatBytes(state.total)}',
-      RegionPhase.failed => 'Download failed. Tap to retry.',
-      RegionPhase.unavailable => '$size · not on this server yet',
+      RegionPhase.preparing => switch (state.step) {
+          'queued' => 'Waiting for the server to finish another map…',
+          'supplies' => 'Server is building the supply list…',
+          _ => 'Server is preparing it: ${formatBytes(state.received)} of ${formatBytes(state.total)}',
+        },
+      RegionPhase.failed => '${state.error ?? 'Download failed'}. Tap to retry.',
+      RegionPhase.unavailable => switch (store.unavailableReason(region)) {
+          UnavailableReason.tooBig => '$size · too big for this server to prepare',
+          UnavailableReason.serverUnreachable => '$size · server unreachable',
+          _ => '$size · not on this server',
+        },
       RegionPhase.ready => isActive ? 'Showing on the map' : '$size · ready',
-      RegionPhase.available => [?parent?.name, size].join(' · '),
+      RegionPhase.available || RegionPhase.preparable => [
+          if (where.isNotEmpty) where,
+          size,
+          if (state.phase == RegionPhase.preparable) 'prepared on request',
+        ].join(' · '),
     };
 
     final Widget trailing = switch (state.phase) {
-      RegionPhase.downloading => _ProgressRing(
+      RegionPhase.downloading || RegionPhase.preparing => _ProgressRing(
           progress: state.progress,
           onCancel: () => store.cancelDownload(region),
         ),
@@ -200,7 +346,7 @@ class _RegionTile extends StatelessWidget {
           ],
         ),
       RegionPhase.unavailable => Icon(Icons.cloud_off_rounded, color: scheme.outline),
-      RegionPhase.available || RegionPhase.failed => IconButton.filledTonal(
+      RegionPhase.available || RegionPhase.preparable || RegionPhase.failed => IconButton.filledTonal(
           tooltip: 'Download',
           onPressed: () => _startDownload(context, store),
           icon: Icon(state.phase == RegionPhase.failed ? Icons.refresh_rounded : Icons.download_rounded),

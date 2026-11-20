@@ -68,6 +68,12 @@ def main() -> None:
         help="highest zoom to keep; the app over-zooms beyond it (default 14)",
     )
     parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=OUT_DIR,
+        help="where to write <id>.pmtiles (default: regions/ in the repo)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help=("report how big the extract would be without downloading it. "
@@ -81,12 +87,16 @@ def main() -> None:
 
     region = find_region(args.region)
     west, south, east, north = region["bbox"]
-    OUT_DIR.mkdir(exist_ok=True)
-    target = OUT_DIR / f"{region['id']}.pmtiles"
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    target = args.out_dir / f"{region['id']}.pmtiles"
+    # Extract to a side file and rename when complete: the region server
+    # only serves finished names, so a half-written map is never handed out
+    # (and the server reports progress from the side file's size).
+    partial = target.with_name(target.name + ".part")
 
     source = latest_planet_url()
     command = [
-        "go", "run", GO_PMTILES, "extract", source, str(target),
+        "go", "run", GO_PMTILES, "extract", source, str(partial),
         f"--bbox={west},{south},{east},{north}",
         f"--maxzoom={args.maxzoom}",
     ]
@@ -96,7 +106,9 @@ def main() -> None:
         return
 
     print(f"Extracting {region['name']} from {source}", flush=True)
+    partial.unlink(missing_ok=True)  # go-pmtiles won't resume; start clean
     subprocess.run(command, check=True)
+    partial.replace(target)
     size_mb = target.stat().st_size / 1_000_000
     print(f"Wrote {target} ({size_mb:.1f} MB)")
 
