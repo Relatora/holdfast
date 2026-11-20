@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -7,7 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'region_files.dart';
 
 /// Phones and desktops: regions live under the app-support directory as
-/// `<id>.pmtiles` and `<id>.pois.json`.
+/// `<id>.pmtiles`, `<id>.pois.json` and `<id>.routing.bin`.
 ///
 /// Files download to a `.part` name and are renamed only when complete, so a
 /// half-finished download can never be mistaken for a usable map. If the app
@@ -37,15 +38,17 @@ class PlatformRegionFiles implements RegionFiles {
     required String regionId,
     required Uri basemap,
     Uri? pois,
+    Uri? routing,
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
   }) async {
-    // The POI pack is small, so fetch it first; then the basemap reports
-    // progress for the part that actually takes time.
-    if (pois != null) {
-      final response = await http.get(pois);
+    // The side packs are small, so fetch them first; then the basemap
+    // reports progress for the part that actually takes time.
+    for (final (url, name) in [(pois, '$regionId.pois.json'), (routing, '$regionId.routing.bin')]) {
+      if (url == null) continue;
+      final response = await http.get(url);
       if (response.statusCode == 200) {
-        await (await _file('$regionId.pois.json')).writeAsBytes(response.bodyBytes);
+        await (await _file(name)).writeAsBytes(response.bodyBytes);
       }
     }
     await _resumableDownload(
@@ -120,8 +123,27 @@ class PlatformRegionFiles implements RegionFiles {
   }
 
   @override
+  Future<Uint8List?> readRouting(String regionId) async {
+    final file = await _file('$regionId.routing.bin');
+    return await file.exists() ? file.readAsBytes() : null;
+  }
+
+  @override
+  Future<void> saveRouting(String regionId, Uint8List bytes) async {
+    final file = await _file('$regionId.routing.bin');
+    final part = File('${file.path}.part');
+    await part.writeAsBytes(bytes, flush: true);
+    await part.rename(file.path);
+  }
+
+  @override
   Future<void> delete(String regionId) async {
-    for (final name in ['$regionId.pmtiles', '$regionId.pmtiles.part', '$regionId.pois.json']) {
+    for (final name in [
+      '$regionId.pmtiles',
+      '$regionId.pmtiles.part',
+      '$regionId.pois.json',
+      '$regionId.routing.bin',
+    ]) {
       final file = await _file(name);
       if (await file.exists()) await file.delete();
     }

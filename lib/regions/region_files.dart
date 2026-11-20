@@ -6,6 +6,8 @@
 /// demos, and says so in the UI.
 library;
 
+import 'dart:typed_data';
+
 import 'region_files_stub.dart'
     if (dart.library.io) 'region_files_io.dart'
     if (dart.library.js_interop) 'region_files_web.dart' as impl;
@@ -39,13 +41,15 @@ abstract class RegionFiles {
   /// False on the web, where regions are streamed rather than stored.
   bool get storesOffline;
 
-  /// Downloads a region's basemap and (when the server has one) its POI
-  /// pack. [onProgress] receives bytes so far and the expected total.
+  /// Downloads a region's basemap and, when the server has them, its POI
+  /// pack and routing pack. [onProgress] receives basemap bytes so far and
+  /// the expected total.
   /// Partial downloads resume where they stopped.
   Future<void> download({
     required String regionId,
     required Uri basemap,
     Uri? pois,
+    Uri? routing,
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
   });
@@ -57,6 +61,13 @@ abstract class RegionFiles {
 
   /// The region's POI pack JSON, or null if it has none.
   Future<String?> readPois(String regionId);
+
+  /// The region's routing pack (see `RoutingGraph`), or null if it has none.
+  Future<Uint8List?> readRouting(String regionId);
+
+  /// Stores a routing pack fetched after the region itself was downloaded
+  /// (maps saved before directions existed), so it works offline next time.
+  Future<void> saveRouting(String regionId, Uint8List bytes);
 
   Future<void> delete(String regionId);
 }

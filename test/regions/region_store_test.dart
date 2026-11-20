@@ -35,6 +35,7 @@ class _FakeFiles implements RegionFiles {
     required String regionId,
     required Uri basemap,
     Uri? pois,
+    Uri? routing,
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
   }) async {
@@ -50,6 +51,12 @@ class _FakeFiles implements RegionFiles {
 
   @override
   Future<String?> readPois(String regionId) async => null;
+
+  @override
+  Future<Uint8List?> readRouting(String regionId) async => null;
+
+  @override
+  Future<void> saveRouting(String regionId, Uint8List bytes) async {}
 
   @override
   Future<void> delete(String regionId) async => downloaded.remove(regionId);
@@ -73,7 +80,10 @@ class _FakeServer {
         jsonEncode({
           'regions': {
             for (final e in hosted.entries)
-              e.key: {'pmtilesBytes': e.value, if (!mapOnly.contains(e.key)) 'poisBytes': 1000},
+              e.key: {
+                'pmtilesBytes': e.value,
+                if (!mapOnly.contains(e.key)) ...{'poisBytes': 1000, 'routingBytes': 1000},
+              },
           },
           'prepare': {'enabled': true, 'maxBytes': 3000000000},
           'jobs': {},

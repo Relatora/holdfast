@@ -6,8 +6,9 @@ import '../theme/motion.dart';
 import 'poi.dart';
 import 'poi_index.dart';
 
-/// Details for one supply location.
-Future<void> showPlaceSheet(BuildContext context, Poi poi, {double? meters}) {
+/// Details for one supply location. [onDirections], when given, adds a
+/// Directions button that closes the sheet and plans a route there.
+Future<void> showPlaceSheet(BuildContext context, Poi poi, {double? meters, VoidCallback? onDirections}) {
   return showModalBottomSheet<void>(
     context: context,
     builder: (context) {
@@ -44,6 +45,17 @@ Future<void> showPlaceSheet(BuildContext context, Poi poi, {double? meters}) {
                 StarButton(poi: poi),
               ],
             ),
+            if (onDirections != null) ...[
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  onDirections();
+                },
+                icon: const Icon(Icons.directions_rounded),
+                label: const Text('Directions'),
+              ),
+            ],
             const SizedBox(height: 12),
             for (final (icon, text) in rows)
               ListTile(contentPadding: EdgeInsets.zero, dense: true, leading: Icon(icon), title: Text(text)),

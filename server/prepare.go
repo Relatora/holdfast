@@ -10,6 +10,7 @@ package main
 //
 //	tool/fetch_region.py  cuts the basemap out of the Protomaps planet build
 //	tool/import_pois.py   pulls the supply locations from Overpass
+//	tool/build_routing.py compiles the road and rail network for directions
 //
 // Jobs run one at a time: each is bandwidth-bound, so running two at once
 // would only make both slower. Both tools write to "<file>.part" and rename
@@ -73,7 +74,7 @@ const (
 type Job struct {
 	RegionID string   `json:"regionId"`
 	State    JobState `json:"state"`
-	// Step is "map" or "supplies" while running.
+	// Step is "map", "supplies" or "routes" while running.
 	Step string `json:"step,omitempty"`
 	// BytesDone counts the basemap written so far; BytesTotal is the
 	// catalog's measured size, so the ratio is a real progress fraction.
@@ -91,6 +92,8 @@ type Builder interface {
 	BuildMap(ctx context.Context, region CatalogRegion) error
 	// BuildPois writes <dir>/<id>.pois.json.
 	BuildPois(ctx context.Context, region CatalogRegion) error
+	// BuildRoutes writes <dir>/<id>.routing.bin.
+	BuildRoutes(ctx context.Context, region CatalogRegion) error
 }
 
 var (
@@ -203,11 +206,19 @@ func wantsSupplies(region CatalogRegion) bool {
 	return region.Level == "city" || region.Level == "province"
 }
 
+// wantsRoutes: a road network only comes back from Overpass for a city.
+// Provinces and up need a planet-file pipeline (osmium), not built yet.
+func wantsRoutes(region CatalogRegion) bool {
+	return region.Level == "city"
+}
+
 // complete is true when nothing is left to build. A map whose supply list
-// failed earlier (Overpass is a shared, sometimes overloaded service) is not
-// complete, so asking again retries just the supply list.
+// or routing pack failed earlier (Overpass is a shared, sometimes overloaded
+// service) is not complete, so asking again retries just what is missing.
 func (p *Preparer) complete(region CatalogRegion) bool {
-	return p.exists(region.ID+".pmtiles") && (!wantsSupplies(region) || p.exists(region.ID+".pois.json"))
+	return p.exists(region.ID+".pmtiles") &&
+		(!wantsSupplies(region) || p.exists(region.ID+".pois.json")) &&
+		(!wantsRoutes(region) || p.exists(region.ID+".routing.bin"))
 }
 
 func (p *Preparer) work(ctx context.Context) {
@@ -234,20 +245,31 @@ func (p *Preparer) run(ctx context.Context, region CatalogRegion) {
 		}
 	}
 
-	var note string
-	if wantsSupplies(region) {
-		p.update(region.ID, func(j *Job) { j.State = JobRunning })
-		p.update(region.ID, func(j *Job) { j.Step, j.BytesDone = "supplies", j.BytesTotal })
+	var notes []string
+	if wantsSupplies(region) && !p.exists(region.ID+".pois.json") {
+		p.update(region.ID, func(j *Job) { j.State, j.Step, j.BytesDone = JobRunning, "supplies", j.BytesTotal })
 		log.Printf("prepare %s: importing supply locations", region.ID)
 		if err := p.builder.BuildPois(ctx, region); err != nil {
 			log.Printf("prepare %s: supplies failed: %v", region.ID, err)
-			note = "The map is ready, but the supply list could not be built: " + err.Error()
+			notes = append(notes, "The supply list could not be built: "+err.Error())
 		}
-	} else {
-		note = "Supply lists are only built for cities and provinces."
+	} else if !wantsSupplies(region) {
+		notes = append(notes, "Supply lists are only built for cities and provinces.")
 	}
+
+	if wantsRoutes(region) && !p.exists(region.ID+".routing.bin") {
+		p.update(region.ID, func(j *Job) { j.State, j.Step, j.BytesDone = JobRunning, "routes", j.BytesTotal })
+		log.Printf("prepare %s: building the routing network", region.ID)
+		if err := p.builder.BuildRoutes(ctx, region); err != nil {
+			log.Printf("prepare %s: routes failed: %v", region.ID, err)
+			notes = append(notes, "Directions could not be built: "+err.Error())
+		}
+	} else if !wantsRoutes(region) {
+		notes = append(notes, "Offline directions are only built for cities so far.")
+	}
+
 	p.update(region.ID, func(j *Job) {
-		j.State, j.Step, j.BytesDone, j.Note = JobDone, "", j.BytesTotal, note
+		j.State, j.Step, j.BytesDone, j.Note = JobDone, "", j.BytesTotal, strings.Join(notes, " ")
 	})
 	log.Printf("prepare %s: done", region.ID)
 }
@@ -271,6 +293,10 @@ func (b ToolBuilder) BuildMap(ctx context.Context, region CatalogRegion) error {
 
 func (b ToolBuilder) BuildPois(ctx context.Context, region CatalogRegion) error {
 	return b.run(ctx, "import_pois.py", region.ID)
+}
+
+func (b ToolBuilder) BuildRoutes(ctx context.Context, region CatalogRegion) error {
+	return b.run(ctx, "build_routing.py", region.ID)
 }
 
 func (b ToolBuilder) run(ctx context.Context, script, id string) error {

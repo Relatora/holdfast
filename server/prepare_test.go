@@ -16,11 +16,12 @@ import (
 // fakeBuilder writes small files instead of running the real tools. Each
 // build waits on release (when set), so a test can look at a job mid-run.
 type fakeBuilder struct {
-	dir      string
-	release  chan struct{}
-	failMap  bool
-	failPois bool
-	maps     atomic.Int32
+	dir        string
+	release    chan struct{}
+	failMap    bool
+	failPois   bool
+	failRoutes bool
+	maps       atomic.Int32
 }
 
 func (b *fakeBuilder) BuildMap(_ context.Context, r CatalogRegion) error {
@@ -43,6 +44,13 @@ func (b *fakeBuilder) BuildPois(_ context.Context, r CatalogRegion) error {
 		return errors.New("overpass busy")
 	}
 	return os.WriteFile(filepath.Join(b.dir, r.ID+".pois.json"), []byte(`{"pois":[]}`), 0o644)
+}
+
+func (b *fakeBuilder) BuildRoutes(_ context.Context, r CatalogRegion) error {
+	if b.failRoutes {
+		return errors.New("overpass at capacity")
+	}
+	return os.WriteFile(filepath.Join(b.dir, r.ID+".routing.bin"), []byte("HFRT"), 0o644)
 }
 
 var testCatalog = map[string]CatalogRegion{
@@ -84,7 +92,7 @@ func TestPrepareBuildsMapAndSupplies(t *testing.T) {
 	if job.State != JobDone || job.Note != "" || job.BytesDone != job.BytesTotal {
 		t.Fatalf("job = %+v", job)
 	}
-	for _, name := range []string{"sarnia.pmtiles", "sarnia.pois.json"} {
+	for _, name := range []string{"sarnia.pmtiles", "sarnia.pois.json", "sarnia.routing.bin"} {
 		if _, err := os.Stat(filepath.Join(b.dir, name)); err != nil {
 			t.Errorf("%s missing: %v", name, err)
 		}
@@ -127,6 +135,7 @@ func TestPrepareSkipsWhatIsAlreadyHosted(t *testing.T) {
 	b := &fakeBuilder{dir: t.TempDir()}
 	os.WriteFile(filepath.Join(b.dir, "sarnia.pmtiles"), []byte("x"), 0o644)
 	os.WriteFile(filepath.Join(b.dir, "sarnia.pois.json"), []byte("{}"), 0o644)
+	os.WriteFile(filepath.Join(b.dir, "sarnia.routing.bin"), []byte("HFRT"), 0o644)
 	p := newPreparer(t, b)
 
 	job, err := p.Start("sarnia")
@@ -152,6 +161,24 @@ func TestPrepareRetriesOnlyAMissingSupplyList(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(b.dir, "sarnia.pois.json")); err != nil {
 		t.Fatal("supply list not built")
+	}
+}
+
+func TestPrepareWithoutRoutesStillSucceeds(t *testing.T) {
+	b := &fakeBuilder{dir: t.TempDir(), failRoutes: true}
+	p := newPreparer(t, b)
+	p.Start("sarnia")
+	if job := waitFor(t, p, "sarnia"); job.State != JobDone || !strings.Contains(job.Note, "Directions") {
+		t.Fatalf("job = %+v", job)
+	}
+	// Asking again retries only the routing pack.
+	b.failRoutes = false
+	p.Start("sarnia")
+	if job := waitFor(t, p, "sarnia"); job.State != JobDone || job.Note != "" {
+		t.Fatalf("retry = %+v", job)
+	}
+	if n := b.maps.Load(); n != 1 {
+		t.Fatalf("map built %d times, want 1", n)
 	}
 }
 
