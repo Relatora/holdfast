@@ -55,6 +55,9 @@ TAG_RULES: list[tuple[str, str, set[str]]] = [
     ("shelter", "amenity", {"shelter", "community_centre", "fire_station", "police"}),
     ("shelter", "emergency", {"assembly_point"}),
     ("shelter", "social_facility", {"shelter"}),
+    # Airports, regional airfields and private strips: where airlifts,
+    # medical flights and supply drops land when the roads are cut.
+    ("airport", "aeroway", {"aerodrome"}),
 ]
 
 # Chains that stock food, water and tools in one stop. Matched against the
