@@ -273,22 +273,25 @@ class Writer:
         self.out += raw
 
 
-def _pin_station(station, rail_nodes, coords, usage, within=400.0) -> bool:
-    """Turn the rail node nearest the station into a vertex. False when no
-    track passes within [within] metres (a bus-only or closed station)."""
+def _pin_station(station, rail_ways, coords, usage, within=400.0) -> bool:
+    """On each rail way passing within [within] metres of the station, turn
+    the closest node into a vertex. False when no track passes that close
+    (a bus-only or closed station)."""
     lat, lon, _name = station
-    best, best_m = None, within
-    for node in rail_nodes:
-        nlat, nlon = coords[node]
-        if abs(nlat - lat) > 0.005 or abs(nlon - lon) > 0.007:
-            continue  # cheap box test before the real distance
-        m = metres((lat, lon), (nlat, nlon))
-        if m < best_m:
-            best, best_m = node, m
-    if best is None:
-        return False
-    usage[best] = max(usage.get(best, 0), 2)
-    return True
+    pinned = False
+    for refs in rail_ways:
+        best, best_m = None, within
+        for node in refs:
+            nlat, nlon = coords[node]
+            if abs(nlat - lat) > 0.005 or abs(nlon - lon) > 0.007:
+                continue  # cheap box test before the real distance
+            m = metres((lat, lon), (nlat, nlon))
+            if m < best_m:
+                best, best_m = node, m
+        if best is not None:
+            usage[best] = max(usage.get(best, 0), 2)
+            pinned = True
+    return pinned
 
 
 def micro(degrees: float) -> int:
@@ -319,7 +322,7 @@ def build(data: dict) -> tuple[bytes, dict[str, int]]:
     # A node becomes a graph vertex when it ends a way or is shared by two.
     usage: dict[int, int] = {}
     usable = []
-    rail_nodes: set[int] = set()
+    rail_ways: list[list[int]] = []
     for way_id, refs, tags in ways:
         modes = modes_for(tags, passenger=way_id in passenger_ids)
         refs = [r for r in refs if r in coords]
@@ -331,12 +334,13 @@ def build(data: dict) -> tuple[bytes, dict[str, int]]:
         usage[refs[0]] += 1
         usage[refs[-1]] += 1
         if modes == RAIL:
-            rail_nodes.update(refs)
+            rail_ways.append(refs)
 
     # Tracks run for kilometres between junctions, so a station is rarely
-    # near a vertex. Make the track node closest to each station a vertex,
-    # so the app can board and alight there.
-    stations = [s for s in stations if _pin_station(s, rail_nodes, coords, usage)]
+    # near a vertex. On every track passing the station, make the closest
+    # node a vertex, so the app can board there, and change lines at a
+    # station two lines share without sharing track (Ottawa's Bayview).
+    stations = [s for s in stations if _pin_station(s, rail_ways, coords, usage)]
 
     vertex_of: dict[int, int] = {}
     vertices: list[tuple[float, float]] = []
