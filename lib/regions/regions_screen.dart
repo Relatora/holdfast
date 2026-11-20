@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../theme/motion.dart';
+import 'my_maps_sheet.dart';
 import 'region.dart';
 import 'region_store.dart';
 
@@ -361,18 +362,21 @@ class _RegionTile extends StatelessWidget {
         leading: CircleAvatar(
           backgroundColor: scheme.primary.withValues(alpha: 0.15),
           foregroundColor: scheme.primary,
-          child: Icon(switch (region.level) {
-            RegionLevel.city => Icons.location_city_rounded,
-            RegionLevel.province => Icons.terrain_rounded,
-            RegionLevel.country => Icons.flag_rounded,
-            RegionLevel.continent => Icons.public_rounded,
-            RegionLevel.world => Icons.language_rounded,
-          }),
+          child: Icon(regionLevelIcon(region.level)),
         ),
         title: Text(region.name, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(subtitle),
         trailing: trailing,
-        onTap: state.phase == RegionPhase.failed ? () => _startDownload(context, store) : null,
+        onTap: switch (state.phase) {
+          RegionPhase.failed => () => _startDownload(context, store),
+          // A downloaded map: switch to it and go back to the map, which
+          // flies there (the screen returns the region to the home screen).
+          RegionPhase.ready => () async {
+              await store.activate(region);
+              if (context.mounted) Navigator.of(context).pop(region);
+            },
+          _ => null,
+        },
       ),
     );
   }

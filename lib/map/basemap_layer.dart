@@ -84,10 +84,17 @@ class _BasemapLayerState extends State<BasemapLayer> {
         final provider = snapshot.data;
         if (provider == null) return const SizedBox.shrink();
         return VectorTileLayer(
-          // The layer caches rendered tiles, so a new source *or* a new style
-          // needs a new key; otherwise old-coloured tiles linger after a
-          // theme switch (night vision would keep a grey map).
-          key: ValueKey('${widget.source}|${widget.mode.name}'),
+          // The layer keeps its tile providers and rendered tiles for its
+          // whole life, so a new provider *or* a new style needs a new key;
+          // otherwise old-coloured tiles linger after a theme switch.
+          //
+          // Keyed by the provider object, not the source path: while a new
+          // source opens, FutureBuilder keeps handing back the *previous*
+          // provider. A key built from the new path wrapped the old
+          // region's provider, and when the new one arrived the key didn't
+          // change, so the layer never let go of it: switching maps left
+          // the basemap blank (#47).
+          key: ValueKey((provider, widget.mode)),
           theme: basemapStyleFor(widget.mode),
           tileProviders: TileProviders({'protomaps': provider}),
           // The layer renders in raster mode (the package default), where
