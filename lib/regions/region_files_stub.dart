@@ -13,7 +13,7 @@ class PlatformRegionFiles implements RegionFiles {
     required String regionId,
     required Uri basemap,
     Uri? pois,
-    Uri? routing,
+    Map<SidePack, Uri> packs = const {},
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
   }) =>
@@ -29,10 +29,10 @@ class PlatformRegionFiles implements RegionFiles {
   Future<String?> readPois(String regionId) async => null;
 
   @override
-  Future<Uint8List?> readRouting(String regionId) async => null;
+  Future<Uint8List?> readPack(String regionId, SidePack pack) async => null;
 
   @override
-  Future<void> saveRouting(String regionId, Uint8List bytes) async {}
+  Future<void> savePack(String regionId, SidePack pack, Uint8List bytes) async {}
 
   @override
   Future<void> delete(String regionId) async {}

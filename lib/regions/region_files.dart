@@ -35,6 +35,26 @@ class DownloadCancelledException implements Exception {
   const DownloadCancelledException();
 }
 
+/// Small binary files that travel with a region's map, each built by a tool
+/// in `tool/` and decoded by the app.
+enum SidePack {
+  /// Road and rail network for directions (`RoutingGraph`).
+  routing('routing.bin', 'routingBytes'),
+
+  /// People per grid cell, for casualty estimates (`PopulationGrid`).
+  population('population.bin', 'populationBytes');
+
+  const SidePack(this.extension, this.indexKey);
+
+  /// File name after the region id: `<id>.<extension>`.
+  final String extension;
+
+  /// The size field for this pack in the server's `index.json`.
+  final String indexKey;
+
+  String fileName(String regionId) => '$regionId.$extension';
+}
+
 abstract class RegionFiles {
   factory RegionFiles() = impl.PlatformRegionFiles;
 
@@ -42,14 +62,14 @@ abstract class RegionFiles {
   bool get storesOffline;
 
   /// Downloads a region's basemap and, when the server has them, its POI
-  /// pack and routing pack. [onProgress] receives basemap bytes so far and
+  /// pack and side [packs]. [onProgress] receives basemap bytes so far and
   /// the expected total.
   /// Partial downloads resume where they stopped.
   Future<void> download({
     required String regionId,
     required Uri basemap,
     Uri? pois,
-    Uri? routing,
+    Map<SidePack, Uri> packs = const {},
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
   });
@@ -62,12 +82,12 @@ abstract class RegionFiles {
   /// The region's POI pack JSON, or null if it has none.
   Future<String?> readPois(String regionId);
 
-  /// The region's routing pack (see `RoutingGraph`), or null if it has none.
-  Future<Uint8List?> readRouting(String regionId);
+  /// One of the region's side packs, or null if it has none.
+  Future<Uint8List?> readPack(String regionId, SidePack pack);
 
-  /// Stores a routing pack fetched after the region itself was downloaded
-  /// (maps saved before directions existed), so it works offline next time.
-  Future<void> saveRouting(String regionId, Uint8List bytes);
+  /// Stores a side pack fetched after the region itself was downloaded
+  /// (maps saved before that pack existed), so it works offline next time.
+  Future<void> savePack(String regionId, SidePack pack, Uint8List bytes);
 
   Future<void> delete(String regionId);
 }

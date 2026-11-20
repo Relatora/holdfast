@@ -3,11 +3,15 @@
 library;
 
 
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../hazards/effects/nuclear_effects.dart';
 import '../hazards/hazard.dart';
+import '../hazards/hazard_details.dart';
 import 'router.dart';
 import 'routing_graph.dart';
 
@@ -33,8 +37,20 @@ double avoidRadiusMeters(HazardType type) => switch (type) {
 
 List<Avoid> avoidAreas(Iterable<Hazard> hazards) => [
       for (final h in hazards)
-        if (avoidRadiusMeters(h.type) > 0) Avoid(LatLng(h.latitude, h.longitude), avoidRadiusMeters(h.type)),
+        if (_radiusFor(h) > 0) Avoid(LatLng(h.latitude, h.longitude), _radiusFor(h)),
     ];
+
+/// A nuclear detonation with a known yield is avoided out to the furthest
+/// of its 5 psi (collapsed buildings, blocked roads), burn and radiation
+/// rings, rather than the type's fixed floor.
+double _radiusFor(Hazard hazard) {
+  final nuclear = hazard.nuclear;
+  if (nuclear == null) return avoidRadiusMeters(hazard.type);
+  final reach = nuclearEffects(nuclear)
+      .where((r) => r.kind != RingKind.lightBlast)
+      .fold(0.0, (m, r) => math.max(m, r.radiusMeters));
+  return math.max(reach, avoidRadiusMeters(hazard.type));
+}
 
 /// The device's position, or null when it has none or may not share it.
 ///
