@@ -26,6 +26,12 @@ class PoiIndex {
 
   bool get isEmpty => pois.isEmpty;
 
+  /// Built on first use: only starred-place lookups need it.
+  late final Map<String, Poi> _byId = {for (final poi in pois) poi.id: poi};
+
+  /// The live copy of a place, or null when this region doesn't have it.
+  Poi? byId(String id) => _byId[id];
+
   /// Places of the given [categories] (all when empty) whose title contains
   /// [query], case-insensitively.
   List<Poi> filter({Set<PoiCategory> categories = const {}, String query = ''}) {
