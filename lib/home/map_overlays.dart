@@ -3,13 +3,21 @@ library;
 
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:provider/provider.dart';
 
+import '../favorites/favorites_store.dart';
+import '../favorites/star_button.dart';
 import '../hazards/hazard_repository.dart';
 import '../pois/poi.dart';
 import '../pois/poi_index.dart';
 import '../regions/region.dart';
 
 /// Search over the active region's supply locations, fully offline.
+///
+/// With nothing typed, the search view shows the person's favourites:
+/// saved searches as chips (tap to rerun) and starred places (tap to fly
+/// there). While typing, the first row saves the query and every result
+/// carries a star.
 class PlaceSearchBar extends StatelessWidget {
   const PlaceSearchBar({
     super.key,
@@ -37,20 +45,164 @@ class PlaceSearchBar extends StatelessWidget {
         ],
       ),
       suggestionsBuilder: (context, controller) {
-        final matches = index.filter(query: controller.text).take(30);
+        void select(Poi poi) {
+          controller.closeView(poi.title);
+          onSelected(poi);
+        }
+
+        final query = controller.text.trim();
+        if (query.isEmpty) {
+          return [_FavoritesView(index: index, controller: controller, onSelected: select)];
+        }
+        final matches = index.filter(query: query).take(30);
         return [
+          _SaveSearchTile(query: query),
           for (final poi in matches)
             ListTile(
               leading: Icon(poi.category.icon, color: poi.category.color),
               title: Text(poi.title),
               subtitle: Text([poi.category.label, ?poi.address].join(' · ')),
-              onTap: () {
-                controller.closeView(poi.title);
-                onSelected(poi);
-              },
+              trailing: StarButton(poi: poi),
+              onTap: () => select(poi),
+            ),
+          if (matches.isEmpty)
+            const ListTile(
+              leading: Icon(Icons.search_off_rounded),
+              title: Text('No places match in this map'),
             ),
         ];
       },
+    );
+  }
+}
+
+/// "Save this search" / "Search saved": the first row while typing.
+class _SaveSearchTile extends StatelessWidget {
+  const _SaveSearchTile({required this.query});
+
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.read<FavoritesStore>();
+    final scheme = Theme.of(context).colorScheme;
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final saved = store.isSaved(query);
+        return ListTile(
+          leading: Icon(
+            saved ? Icons.bookmark_rounded : Icons.bookmark_add_outlined,
+            color: saved ? scheme.primary : null,
+          ),
+          title: Text(saved ? 'Search saved' : 'Save this search'),
+          subtitle: Text('“$query”'),
+          trailing: saved ? const Text('Tap to remove') : null,
+          onTap: () => saved ? store.removeSearch(query) : store.saveSearch(query),
+        );
+      },
+    );
+  }
+}
+
+/// The empty-query view: saved searches, then starred places.
+///
+/// One widget listening to the store, rather than a list of suggestions,
+/// because the search view does not rebuild suggestions when favourites
+/// change, only when the text does.
+class _FavoritesView extends StatelessWidget {
+  const _FavoritesView({required this.index, required this.controller, required this.onSelected});
+
+  final PoiIndex index;
+  final SearchController controller;
+  final ValueChanged<Poi> onSelected;
+
+  void _rerun(String query) {
+    // Setting the value (not just the text) puts the cursor at the end, so
+    // the person can keep typing to narrow the search.
+    controller.value = TextEditingValue(
+      text: query,
+      selection: TextSelection.collapsed(offset: query.length),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.read<FavoritesStore>();
+    final theme = Theme.of(context);
+    Widget header(String text) => Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: Text(text, style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.primary)),
+        );
+
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final searches = store.searches;
+        final places = store.places;
+        if (searches.isEmpty && places.isEmpty) {
+          return const ListTile(
+            leading: Icon(Icons.star_outline_rounded),
+            title: Text('No favourites yet'),
+            subtitle: Text('Star a place or save a search, and it will be waiting here, offline.'),
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (searches.isNotEmpty) ...[
+              header('Saved searches'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final query in searches)
+                      InputChip(
+                        avatar: const Icon(Icons.bookmark_rounded, size: 18),
+                        label: Text(query),
+                        onPressed: () => _rerun(query),
+                        onDeleted: () => store.removeSearch(query),
+                        deleteButtonTooltipMessage: 'Remove saved search',
+                      ),
+                  ],
+                ),
+              ),
+            ],
+            if (places.isNotEmpty) ...[
+              header('Starred places'),
+              for (final saved in places)
+                // Prefer the live copy so a refreshed pack's data wins; fall
+                // back to the snapshot when this map doesn't have the place.
+                _StarredPlaceTile(saved: saved, live: index.byId(saved.id), onSelected: onSelected),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _StarredPlaceTile extends StatelessWidget {
+  const _StarredPlaceTile({required this.saved, required this.live, required this.onSelected});
+
+  final Poi saved;
+  final Poi? live;
+  final ValueChanged<Poi> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final poi = live ?? saved;
+    return ListTile(
+      leading: Icon(poi.category.icon, color: poi.category.color),
+      title: Text(poi.title),
+      subtitle: Text([
+        poi.category.label,
+        if (live == null) 'not in this map' else ?poi.address,
+      ].join(' · ')),
+      trailing: StarButton(poi: poi),
+      onTap: () => onSelected(poi),
     );
   }
 }

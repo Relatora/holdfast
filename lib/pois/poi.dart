@@ -87,6 +87,17 @@ class Poi {
       tags: ((json['tags'] as Map?) ?? const {}).cast<String, String>(),
     );
   }
+
+  /// The same shape [fromJson] reads, so a place can be saved on its own
+  /// (a starred place outlives the region pack it came from).
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'cat': category.id,
+        if (name.isNotEmpty) 'name': name,
+        'lat': latitude,
+        'lon': longitude,
+        if (tags.isNotEmpty) 'tags': tags,
+      };
 }
 
 /// Great-circle distance in metres (haversine). Accurate to well under 1%

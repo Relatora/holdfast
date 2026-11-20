@@ -1,6 +1,7 @@
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../favorites/star_button.dart';
 import '../theme/motion.dart';
 import 'poi.dart';
 import 'poi_index.dart';
@@ -40,6 +41,7 @@ Future<void> showPlaceSheet(BuildContext context, Poi poi, {double? meters}) {
                     ],
                   ),
                 ),
+                StarButton(poi: poi),
               ],
             ),
             const SizedBox(height: 12),

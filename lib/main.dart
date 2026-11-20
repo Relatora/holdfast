@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 
 import 'app.dart';
 import 'config.dart';
+import 'favorites/favorites_store.dart';
 import 'hazards/hazard_repository.dart';
 import 'regions/region_store.dart';
 import 'settings/app_settings.dart';
@@ -20,6 +21,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final settings = await AppSettings.load();
+  final favorites = await FavoritesStore.load();
   final regions = RegionStore();
   final hazards = HazardRepository(
     deviceId: settings.deviceId,
@@ -34,6 +36,7 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: settings),
+        ChangeNotifierProvider.value(value: favorites),
         ChangeNotifierProvider.value(value: regions),
         ChangeNotifierProvider.value(value: hazards),
       ],
