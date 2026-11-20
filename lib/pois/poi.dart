@@ -18,7 +18,11 @@ enum PoiCategory {
   medical('medical', 'Medical', 'Medical', Icons.local_hospital_rounded, Color(0xFFE0565B)),
   water('water', 'Water', 'Drinking water', Icons.water_drop_rounded, Color(0xFF3A8FD6)),
   fuel('fuel', 'Fuel', 'Fuel & propane', Icons.local_gas_station_rounded, Color(0xFF8E6BD8)),
-  shelter('shelter', 'Shelter', 'Shelter & safety', Icons.night_shelter_rounded, Color(0xFF6B7F99));
+  shelter('shelter', 'Shelter', 'Shelter & safety', Icons.night_shelter_rounded, Color(0xFF6B7F99)),
+
+  /// Airports and airfields (OSM `aeroway=aerodrome`): where airlifts,
+  /// medical flights and supply drops land once roads are cut.
+  airport('airport', 'Airports', 'Airport & airfield', Icons.local_airport_rounded, Color(0xFFC2589B));
 
   const PoiCategory(this.id, this.shortLabel, this.label, this.icon, this.color);
 
