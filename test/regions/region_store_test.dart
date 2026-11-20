@@ -35,7 +35,7 @@ class _FakeFiles implements RegionFiles {
     required String regionId,
     required Uri basemap,
     Uri? pois,
-    Uri? routing,
+    Map<SidePack, Uri> packs = const {},
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
   }) async {
@@ -53,10 +53,10 @@ class _FakeFiles implements RegionFiles {
   Future<String?> readPois(String regionId) async => null;
 
   @override
-  Future<Uint8List?> readRouting(String regionId) async => null;
+  Future<Uint8List?> readPack(String regionId, SidePack pack) async => null;
 
   @override
-  Future<void> saveRouting(String regionId, Uint8List bytes) async {}
+  Future<void> savePack(String regionId, SidePack pack, Uint8List bytes) async {}
 
   @override
   Future<void> delete(String regionId) async => downloaded.remove(regionId);
@@ -82,7 +82,7 @@ class _FakeServer {
             for (final e in hosted.entries)
               e.key: {
                 'pmtilesBytes': e.value,
-                if (!mapOnly.contains(e.key)) ...{'poisBytes': 1000, 'routingBytes': 1000},
+                if (!mapOnly.contains(e.key)) ...{'poisBytes': 1000, 'routingBytes': 1000, 'populationBytes': 100},
               },
           },
           'prepare': {'enabled': true, 'maxBytes': 3000000000},

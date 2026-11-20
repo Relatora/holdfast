@@ -46,6 +46,10 @@ func (b *fakeBuilder) BuildPois(_ context.Context, r CatalogRegion) error {
 	return os.WriteFile(filepath.Join(b.dir, r.ID+".pois.json"), []byte(`{"pois":[]}`), 0o644)
 }
 
+func (b *fakeBuilder) BuildPopulation(_ context.Context, r CatalogRegion) error {
+	return os.WriteFile(filepath.Join(b.dir, r.ID+".population.bin"), []byte("HFPP"), 0o644)
+}
+
 func (b *fakeBuilder) BuildRoutes(_ context.Context, r CatalogRegion) error {
 	if b.failRoutes {
 		return errors.New("overpass at capacity")
@@ -92,7 +96,7 @@ func TestPrepareBuildsMapAndSupplies(t *testing.T) {
 	if job.State != JobDone || job.Note != "" || job.BytesDone != job.BytesTotal {
 		t.Fatalf("job = %+v", job)
 	}
-	for _, name := range []string{"sarnia.pmtiles", "sarnia.pois.json", "sarnia.routing.bin"} {
+	for _, name := range []string{"sarnia.pmtiles", "sarnia.pois.json", "sarnia.routing.bin", "sarnia.population.bin"} {
 		if _, err := os.Stat(filepath.Join(b.dir, name)); err != nil {
 			t.Errorf("%s missing: %v", name, err)
 		}
@@ -136,6 +140,7 @@ func TestPrepareSkipsWhatIsAlreadyHosted(t *testing.T) {
 	os.WriteFile(filepath.Join(b.dir, "sarnia.pmtiles"), []byte("x"), 0o644)
 	os.WriteFile(filepath.Join(b.dir, "sarnia.pois.json"), []byte("{}"), 0o644)
 	os.WriteFile(filepath.Join(b.dir, "sarnia.routing.bin"), []byte("HFRT"), 0o644)
+	os.WriteFile(filepath.Join(b.dir, "sarnia.population.bin"), []byte("HFPP"), 0o644)
 	p := newPreparer(t, b)
 
 	job, err := p.Start("sarnia")

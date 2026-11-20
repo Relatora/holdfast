@@ -156,15 +156,16 @@ func parseBBox(raw string) (BBox, error) {
 
 // Only plain region file names are served, which rules out path traversal
 // ("../../etc/passwd") without having to reason about cleaned paths.
-var regionFileName = regexp.MustCompile(`^[a-z0-9-]+\.(pmtiles|pois\.json|routing\.bin)$`)
+var regionFileName = regexp.MustCompile(`^[a-z0-9-]+\.(pmtiles|pois\.json|routing\.bin|population\.bin)$`)
 
 // regionIndex lists the region files actually present, with real sizes, so
 // the app can show which catalog regions are downloadable and how big.
 func (s *Server) regionIndex(w http.ResponseWriter, _ *http.Request) {
 	type entry struct {
-		PmtilesBytes int64  `json:"pmtilesBytes"`
-		PoisBytes    *int64 `json:"poisBytes,omitempty"`
-		RoutingBytes *int64 `json:"routingBytes,omitempty"`
+		PmtilesBytes    int64  `json:"pmtilesBytes"`
+		PoisBytes       *int64 `json:"poisBytes,omitempty"`
+		RoutingBytes    *int64 `json:"routingBytes,omitempty"`
+		PopulationBytes *int64 `json:"populationBytes,omitempty"`
 	}
 	regions := map[string]entry{}
 	matches, _ := filepath.Glob(filepath.Join(s.regionsDir, "*.pmtiles"))
@@ -182,6 +183,10 @@ func (s *Server) regionIndex(w http.ResponseWriter, _ *http.Request) {
 		if routing, err := os.Stat(filepath.Join(s.regionsDir, id+".routing.bin")); err == nil {
 			size := routing.Size()
 			e.RoutingBytes = &size
+		}
+		if population, err := os.Stat(filepath.Join(s.regionsDir, id+".population.bin")); err == nil {
+			size := population.Size()
+			e.PopulationBytes = &size
 		}
 		regions[id] = e
 	}

@@ -8,7 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'region_files.dart';
 
 /// Phones and desktops: regions live under the app-support directory as
-/// `<id>.pmtiles`, `<id>.pois.json` and `<id>.routing.bin`.
+/// `<id>.pmtiles`, `<id>.pois.json` and one file per [SidePack].
 ///
 /// Files download to a `.part` name and are renamed only when complete, so a
 /// half-finished download can never be mistaken for a usable map. If the app
@@ -38,13 +38,16 @@ class PlatformRegionFiles implements RegionFiles {
     required String regionId,
     required Uri basemap,
     Uri? pois,
-    Uri? routing,
+    Map<SidePack, Uri> packs = const {},
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
   }) async {
     // The side packs are small, so fetch them first; then the basemap
     // reports progress for the part that actually takes time.
-    for (final (url, name) in [(pois, '$regionId.pois.json'), (routing, '$regionId.routing.bin')]) {
+    for (final (url, name) in [
+      (pois, '$regionId.pois.json'),
+      for (final MapEntry(key: pack, value: url) in packs.entries) (url, pack.fileName(regionId)),
+    ]) {
       if (url == null) continue;
       final response = await http.get(url);
       if (response.statusCode == 200) {
@@ -123,14 +126,14 @@ class PlatformRegionFiles implements RegionFiles {
   }
 
   @override
-  Future<Uint8List?> readRouting(String regionId) async {
-    final file = await _file('$regionId.routing.bin');
+  Future<Uint8List?> readPack(String regionId, SidePack pack) async {
+    final file = await _file(pack.fileName(regionId));
     return await file.exists() ? file.readAsBytes() : null;
   }
 
   @override
-  Future<void> saveRouting(String regionId, Uint8List bytes) async {
-    final file = await _file('$regionId.routing.bin');
+  Future<void> savePack(String regionId, SidePack pack, Uint8List bytes) async {
+    final file = await _file(pack.fileName(regionId));
     final part = File('${file.path}.part');
     await part.writeAsBytes(bytes, flush: true);
     await part.rename(file.path);
@@ -142,7 +145,7 @@ class PlatformRegionFiles implements RegionFiles {
       '$regionId.pmtiles',
       '$regionId.pmtiles.part',
       '$regionId.pois.json',
-      '$regionId.routing.bin',
+      for (final pack in SidePack.values) pack.fileName(regionId),
     ]) {
       final file = await _file(name);
       if (await file.exists()) await file.delete();

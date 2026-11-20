@@ -31,6 +31,7 @@ class AppSettings extends ChangeNotifier {
   static const _kOnboardingDismissed = 'onboardingDismissed';
   static const _kShowUnverified = 'showUnverifiedHazards';
   static const _kHazardCategories = 'hazardCategories';
+  static const _kNuclearView = 'nuclearView';
   static const _kDeviceId = 'deviceId';
 
   final SharedPreferences _prefs;
@@ -84,4 +85,21 @@ class AppSettings extends ChangeNotifier {
     _prefs.setStringList(_kHazardCategories, [for (final c in value) c.name]);
     notifyListeners();
   }
+
+  /// Which effect rings nuclear detonation reports draw on the map.
+  NuclearView get nuclearView => NuclearView.values.asNameMap()[_prefs.getString(_kNuclearView)] ?? NuclearView.human;
+  set nuclearView(NuclearView value) {
+    _prefs.setString(_kNuclearView, value.name);
+    notifyListeners();
+  }
+}
+
+/// The two ways to read a nuclear detonation's rings, or none.
+enum NuclearView {
+  human('Human impact'),
+  buildings('Building damage'),
+  hidden('Hide rings');
+
+  const NuclearView(this.label);
+  final String label;
 }

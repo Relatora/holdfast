@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
+import '../hazards/effects/nuclear_view.dart';
 import '../hazards/hazard_engine.dart';
 import '../hazards/hazard_filter.dart';
 import '../hazards/hazard_repository.dart';
@@ -25,6 +26,7 @@ import '../pois/poi_index.dart';
 import '../pois/poi_sheets.dart';
 import '../regions/region.dart';
 import '../regions/my_maps_sheet.dart';
+import '../regions/region_files.dart' show SidePack;
 import '../regions/region_store.dart';
 import '../regions/regions_screen.dart';
 import '../routing/directions.dart';
@@ -75,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late final Directions _directions = Directions(
     loadPack: () async {
       final region = _regions.activeRegion;
-      return region == null ? null : _regions.routingPack(region);
+      return region == null ? null : _regions.sidePack(region, SidePack.routing);
     },
     mapCenter: () => _map.camera.center,
   )..addListener(_onDirectionsChanged);
@@ -454,6 +456,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 TopoBackground(animate: animate)
               else
                 BasemapLayer(source: _basemapSource!, mode: mode),
+              nuclearRingsLayer([for (final h in hazards) h.hazard], settings.nuclearView),
               if (_directions.plan case final plan?) ...routeLayers(plan, scheme),
               MarkerLayer(
                 markers: [

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../map/hazard_marker.dart';
 import '../theme/motion.dart';
+import 'effects/nuclear_view.dart';
 import 'hazard.dart';
 import 'hazard_details.dart';
 import 'hazard_engine.dart';
@@ -403,7 +404,12 @@ List<Widget> _detailRows(Hazard hazard, ThemeData theme) {
 Future<void> showHazardDetailsSheet(BuildContext context, String hazardId) {
   return showModalBottomSheet<void>(
     context: context,
-    builder: (_) => _HazardDetailsSheet(hazardId: hazardId),
+    // Scroll-controlled: a nuclear report's ring legend runs long.
+    isScrollControlled: true,
+    builder: (context) => ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
+      child: SingleChildScrollView(child: _HazardDetailsSheet(hazardId: hazardId)),
+    ),
   );
 }
 
@@ -473,6 +479,7 @@ class _HazardDetailsSheet extends StatelessWidget {
             Text('"${hazard.description}"', style: theme.textTheme.bodyLarge),
           ],
           ..._detailRows(hazard, theme),
+          if (hazard.nuclear case final nuclear?) NuclearEffectsPanel(hazard: hazard, details: nuclear),
           const SizedBox(height: 16),
           ListTile(
             contentPadding: EdgeInsets.zero,

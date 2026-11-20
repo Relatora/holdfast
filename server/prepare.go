@@ -11,6 +11,7 @@ package main
 //	tool/fetch_region.py  cuts the basemap out of the Protomaps planet build
 //	tool/import_pois.py   pulls the supply locations from Overpass
 //	tool/build_routing.py compiles the road and rail network for directions
+//	tool/build_population.py cuts the GHSL population grid for casualty estimates
 //
 // Jobs run one at a time: each is bandwidth-bound, so running two at once
 // would only make both slower. Both tools write to "<file>.part" and rename
@@ -74,7 +75,7 @@ const (
 type Job struct {
 	RegionID string   `json:"regionId"`
 	State    JobState `json:"state"`
-	// Step is "map", "supplies" or "routes" while running.
+	// Step is "map", "supplies", "routes" or "population" while running.
 	Step string `json:"step,omitempty"`
 	// BytesDone counts the basemap written so far; BytesTotal is the
 	// catalog's measured size, so the ratio is a real progress fraction.
@@ -94,6 +95,8 @@ type Builder interface {
 	BuildPois(ctx context.Context, region CatalogRegion) error
 	// BuildRoutes writes <dir>/<id>.routing.bin.
 	BuildRoutes(ctx context.Context, region CatalogRegion) error
+	// BuildPopulation writes <dir>/<id>.population.bin.
+	BuildPopulation(ctx context.Context, region CatalogRegion) error
 }
 
 var (
@@ -212,13 +215,21 @@ func wantsRoutes(region CatalogRegion) bool {
 	return region.Level == "city"
 }
 
+// wantsPopulation: the population grid is small for a city or province
+// (kilobytes to a few MB); a country's would be large and is rarely what a
+// casualty estimate around one point needs.
+func wantsPopulation(region CatalogRegion) bool {
+	return region.Level == "city" || region.Level == "province"
+}
+
 // complete is true when nothing is left to build. A map whose supply list
 // or routing pack failed earlier (Overpass is a shared, sometimes overloaded
 // service) is not complete, so asking again retries just what is missing.
 func (p *Preparer) complete(region CatalogRegion) bool {
 	return p.exists(region.ID+".pmtiles") &&
 		(!wantsSupplies(region) || p.exists(region.ID+".pois.json")) &&
-		(!wantsRoutes(region) || p.exists(region.ID+".routing.bin"))
+		(!wantsRoutes(region) || p.exists(region.ID+".routing.bin")) &&
+		(!wantsPopulation(region) || p.exists(region.ID+".population.bin"))
 }
 
 func (p *Preparer) work(ctx context.Context) {
@@ -268,6 +279,15 @@ func (p *Preparer) run(ctx context.Context, region CatalogRegion) {
 		notes = append(notes, "Offline directions are only built for cities so far.")
 	}
 
+	if wantsPopulation(region) && !p.exists(region.ID+".population.bin") {
+		p.update(region.ID, func(j *Job) { j.State, j.Step, j.BytesDone = JobRunning, "population", j.BytesTotal })
+		log.Printf("prepare %s: building the population grid", region.ID)
+		if err := p.builder.BuildPopulation(ctx, region); err != nil {
+			log.Printf("prepare %s: population failed: %v", region.ID, err)
+			notes = append(notes, "Casualty estimates are unavailable: "+err.Error())
+		}
+	}
+
 	p.update(region.ID, func(j *Job) {
 		j.State, j.Step, j.BytesDone, j.Note = JobDone, "", j.BytesTotal, strings.Join(notes, " ")
 	})
@@ -297,6 +317,10 @@ func (b ToolBuilder) BuildPois(ctx context.Context, region CatalogRegion) error 
 
 func (b ToolBuilder) BuildRoutes(ctx context.Context, region CatalogRegion) error {
 	return b.run(ctx, "build_routing.py", region.ID)
+}
+
+func (b ToolBuilder) BuildPopulation(ctx context.Context, region CatalogRegion) error {
+	return b.run(ctx, "build_population.py", region.ID)
 }
 
 func (b ToolBuilder) run(ctx context.Context, script, id string) error {

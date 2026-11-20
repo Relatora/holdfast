@@ -74,7 +74,8 @@ class RegionStore extends ChangeNotifier {
   List<Region> regions = const [];
   final Map<String, int> _hostedBytes = {};
   final Map<String, bool> _hostedPois = {};
-  final Map<String, bool> _hostedRouting = {};
+  /// Side packs the server hosts, per region id.
+  final Map<String, Set<SidePack>> _hostedPacks = {};
   final Map<String, RegionState> _states = {};
   final Map<String, DownloadCancel> _cancels = {};
 
@@ -136,12 +137,15 @@ class RegionStore extends ChangeNotifier {
       final index = body['regions']! as Map;
       _hostedBytes.clear();
       _hostedPois.clear();
-      _hostedRouting.clear();
+      _hostedPacks.clear();
       index.forEach((id, value) {
         final entry = (value as Map).cast<String, Object?>();
         _hostedBytes[id as String] = (entry['pmtilesBytes']! as num).toInt();
         _hostedPois[id] = entry['poisBytes'] != null;
-        _hostedRouting[id] = entry['routingBytes'] != null;
+        _hostedPacks[id] = {
+          for (final pack in SidePack.values)
+            if (entry[pack.indexKey] != null) pack,
+        };
       });
       // Older servers send neither key: no on-demand preparation.
       final prepare = (body['prepare'] as Map?)?.cast<String, Object?>();
@@ -259,21 +263,21 @@ class RegionStore extends ChangeNotifier {
     }
   }
 
-  /// The region's routing pack, from disk or (on the web) from the server.
-  /// Null when the region has none (only cities have them so far).
-  Future<Uint8List?> routingPack(Region region) async {
+  /// One of the region's side packs, from disk or (on the web) from the
+  /// server. Null when the region has none.
+  Future<Uint8List?> sidePack(Region region, SidePack pack) async {
     if (files.storesOffline) {
-      final local = await files.readRouting(region.id);
+      final local = await files.readPack(region.id, pack);
       if (local != null) return local;
     }
     try {
       final response = await _client
-          .get(Uri.parse('${Config.regionsUrl}/${region.id}.routing.bin'))
+          .get(Uri.parse('${Config.regionsUrl}/${pack.fileName(region.id)}'))
           .timeout(const Duration(seconds: 30));
       if (response.statusCode != 200) return null;
-      // Keep it: next time this region's directions work with no network.
+      // Keep it: next time it works with no network.
       if (files.storesOffline && _ready.contains(region.id)) {
-        await files.saveRouting(region.id, response.bodyBytes);
+        await files.savePack(region.id, pack, response.bodyBytes);
       }
       return response.bodyBytes;
     } catch (_) {
@@ -302,9 +306,10 @@ class RegionStore extends ChangeNotifier {
         pois: (_hostedPois[region.id] ?? false)
             ? Uri.parse('${Config.regionsUrl}/${region.id}.pois.json')
             : null,
-        routing: (_hostedRouting[region.id] ?? false)
-            ? Uri.parse('${Config.regionsUrl}/${region.id}.routing.bin')
-            : null,
+        packs: {
+          for (final pack in _hostedPacks[region.id] ?? const <SidePack>{})
+            pack: Uri.parse('${Config.regionsUrl}/${pack.fileName(region.id)}'),
+        },
         cancel: cancel,
         onProgress: (received, total) {
           _states[region.id] = RegionState(RegionPhase.downloading, received: received, total: total);
@@ -327,14 +332,18 @@ class RegionStore extends ChangeNotifier {
 
   /// A hosted region missing a side pack the server can build for it: a
   /// city or province without its supply list, or a city without its
-  /// routing pack (Overpass is a shared service and sometimes overloaded).
+  /// routing or population pack (Overpass is a shared service and
+  /// sometimes overloaded).
   /// Asking the server to prepare it again builds just what is missing, so
   /// the download isn't a map with no supplies or directions.
   bool _missingSupplies(Region region) {
     if (prepareMaxBytes == null || region.remoteUrl != null || !_hostedBytes.containsKey(region.id)) return false;
     final city = region.level == RegionLevel.city;
     final supplies = city || region.level == RegionLevel.province;
-    return (supplies && !(_hostedPois[region.id] ?? false)) || (city && !(_hostedRouting[region.id] ?? false));
+    final packs = _hostedPacks[region.id] ?? const <SidePack>{};
+    return (supplies && !(_hostedPois[region.id] ?? false)) ||
+        (city && !packs.contains(SidePack.routing)) ||
+        (supplies && !packs.contains(SidePack.population));
   }
 
   /// Asks the server to build [region] and follows its progress. Returns
