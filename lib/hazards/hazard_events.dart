@@ -10,7 +10,18 @@ library;
 
 import 'hazard.dart';
 
-enum HazardEventKind { report, vote }
+enum HazardEventKind {
+  report,
+  vote,
+
+  /// Something a device claims about itself, e.g. "completed every training
+  /// scenario". Not tied to a hazard: `hazardId` is `credential:<deviceId>`.
+  credential;
+
+  /// The kinds this version understands, sent to the server so it never
+  /// hands an older app a kind that app can't parse.
+  static String get supported => values.map((k) => k.name).join(',');
+}
 
 /// One fact about one hazard.
 class HazardEvent {
@@ -32,6 +43,7 @@ class HazardEvent {
 
   /// For [HazardEventKind.report]: the hazard's JSON without votes.
   /// For [HazardEventKind.vote]: the vote's JSON.
+  /// For [HazardEventKind.credential]: `{"type": "training", ...}`.
   final Map<String, Object?> payload;
 
   factory HazardEvent.report(String eventId, Hazard hazard) => HazardEvent(
@@ -52,6 +64,17 @@ class HazardEvent {
         payload: vote.toJson(),
       );
 
+  /// "This device completed all [scenarios] of training."
+  factory HazardEvent.trainingCredential(String eventId, String deviceId, DateTime at, List<String> scenarios) =>
+      HazardEvent(
+        id: eventId,
+        kind: HazardEventKind.credential,
+        hazardId: 'credential:$deviceId',
+        deviceId: deviceId,
+        at: at,
+        payload: {'type': 'training', 'scenarios': scenarios},
+      );
+
   /// Latitude and longitude ride along at the top level so the server can
   /// answer "events inside this map area" without understanding payloads.
   double? get latitude => (payload['lat'] as num?)?.toDouble();
@@ -67,6 +90,13 @@ class HazardEvent {
         if (longitude != null) 'lon': longitude,
         'payload': payload,
       };
+
+  /// Parses an event, or returns null for a kind this version doesn't know
+  /// (from a newer app), so one unfamiliar event can't break a whole sync.
+  static HazardEvent? tryFromJson(Map<String, Object?> json) {
+    if (!HazardEventKind.values.asNameMap().containsKey(json['kind'])) return null;
+    return HazardEvent.fromJson(json);
+  }
 
   factory HazardEvent.fromJson(Map<String, Object?> json) => HazardEvent(
         id: json['id']! as String,
@@ -101,6 +131,8 @@ Map<String, Hazard> foldHazardEvents(Iterable<HazardEvent> events) {
         }
       case HazardEventKind.vote:
         votes.putIfAbsent(event.hazardId, () => []).add(HazardVote.fromJson(event.payload));
+      case HazardEventKind.credential:
+        break; // not about a hazard; see trainedDevices
     }
   }
 
@@ -110,3 +142,9 @@ Map<String, Hazard> foldHazardEvents(Iterable<HazardEvent> events) {
           .fold(entry.value, (hazard, vote) => hazard.withVote(vote)),
   };
 }
+
+/// Devices that published a training credential.
+Set<String> trainedDevices(Iterable<HazardEvent> events) => {
+      for (final e in events)
+        if (e.kind == HazardEventKind.credential && e.payload['type'] == 'training') e.deviceId,
+    };

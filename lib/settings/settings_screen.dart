@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../hazards/hazard_repository.dart';
+import '../reputation/my_reporting_screen.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_theme_mode.dart';
 import '../theme/theme_toggle_button.dart';
@@ -43,6 +44,13 @@ class SettingsScreen extends StatelessWidget {
             onChanged: (value) => settings.batterySaver = value,
           ),
           const _Header('Hazards'),
+          ListTile(
+            leading: const Icon(Icons.military_tech_rounded),
+            title: const Text('My reporting'),
+            subtitle: const Text('Your rank, how much your reports count, and achievements.'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyReportingScreen())),
+          ),
           SwitchListTile(
             secondary: const Icon(Icons.air_rounded),
             title: const Text('Fetch wind for hazards'),

@@ -10,6 +10,7 @@ import '../sync/sync_client.dart';
 import 'hazard.dart';
 import 'hazard_engine.dart';
 import 'hazard_events.dart';
+import 'reputation.dart';
 
 enum SyncStatus { idle, syncing, synced, offline }
 
@@ -40,6 +41,17 @@ class HazardRepository extends ChangeNotifier {
   final Set<String> _outbox = {};
   int _cursor = 0;
   Map<String, Hazard> _hazards = const {};
+
+  /// Every device's track record, rebuilt with the hazards.
+  Map<String, ReporterRecord> _reputation = const {};
+
+  /// For this device's own reports: how many other devices have confirmed
+  /// each, last time we looked. A rise means someone just backed us up.
+  Map<String, int>? _confirmationsSeen;
+
+  /// The latest "thank you": other people confirmed one of this device's
+  /// reports. The map shows it as a toast.
+  final thanks = ValueNotifier<ThankYou?>(null);
   Timer? _syncTimer;
   Timer? _clockTimer;
 
@@ -50,14 +62,29 @@ class HazardRepository extends ChangeNotifier {
 
   Iterable<Hazard> get hazards => _hazards.values;
   Hazard? byId(String id) => _hazards[id];
-  HazardAssessment assess(Hazard hazard) => assessHazard(hazard, now);
+  /// Assesses with reputation: reliable reporters' votes count for more.
+  HazardAssessment assess(Hazard hazard) =>
+      assessHazard(hazard, now, reputation: (device) => weightOf(_reputation, device));
+
+  /// A device's track record (empty for one never seen).
+  ReporterRecord recordFor(String device) => _reputation[device] ?? ReporterRecord();
+
+  ReporterRecord get myRecord => recordFor(deviceId);
+
+  /// Publishes that this device finished every training scenario. Other
+  /// devices give it a small, capped head start (see [ReporterRecord]).
+  Future<void> publishTrainingCredential(List<String> scenarios) async {
+    if (myRecord.trained) return;
+    await _record(HazardEvent.trainingCredential(_uuid.v4(), deviceId, now.toUtc(), scenarios));
+  }
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_kLog);
     if (raw != null) {
       for (final item in jsonDecode(raw) as List<Object?>) {
-        _append(HazardEvent.fromJson((item! as Map).cast<String, Object?>()));
+        final event = HazardEvent.tryFromJson((item! as Map).cast<String, Object?>());
+        if (event != null) _append(event);
       }
     }
     _outbox.addAll(prefs.getStringList(_kOutbox) ?? const []);
@@ -65,7 +92,11 @@ class HazardRepository extends ChangeNotifier {
     _refold();
 
     // Re-assess once a minute so hazards expire and fade without a restart.
-    _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) => notifyListeners());
+    // Hazards expire and settle with time, which also moves reputations.
+    _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      _refold();
+      notifyListeners();
+    });
     if (sync != null) {
       unawaited(syncNow());
       _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) => syncNow());
@@ -76,6 +107,7 @@ class HazardRepository extends ChangeNotifier {
   void dispose() {
     _syncTimer?.cancel();
     _clockTimer?.cancel();
+    thanks.dispose();
     super.dispose();
   }
 
@@ -206,13 +238,42 @@ class HazardRepository extends ChangeNotifier {
     if (_logIds.add(event.id)) _log.add(event);
   }
 
-  void _refold() => _hazards = foldHazardEvents(_log);
+  void _refold() {
+    _hazards = foldHazardEvents(_log);
+    _reputation = computeReputation(_hazards.values, now, trained: trainedDevices(_log));
+    _noticeNewConfirmations();
+  }
+
+  /// Raises [thanks] when other devices newly confirm one of our reports.
+  /// The first pass only records the counts, so history never toasts.
+  void _noticeNewConfirmations() {
+    final counts = {
+      for (final h in _hazards.values)
+        if (h.reportedBy == deviceId)
+          h.id: h.votes
+              .where((v) => v.kind == VoteKind.confirm && v.deviceId != deviceId)
+              .map((v) => v.deviceId)
+              .toSet()
+              .length,
+    };
+    final seen = _confirmationsSeen;
+    _confirmationsSeen = counts;
+    if (seen == null) return;
+    for (final MapEntry(key: id, value: count) in counts.entries) {
+      final before = seen[id] ?? 0;
+      if (count > before) {
+        thanks.value = ThankYou(hazard: _hazards[id]!, confirmations: count, multiplier: myRecord.multiplier);
+      }
+    }
+  }
 
   Future<void> _save() async {
     final prefs = await SharedPreferences.getInstance();
-    // Drop events for hazards that ended more than a week ago, so the local
-    // log can't grow forever. The server keeps the full history.
-    final cutoff = now.subtract(const Duration(days: 7));
+    // Drop events for hazards that ended more than 60 days ago, so the local
+    // log can't grow forever. Settled hazards are kept that long because
+    // reporters' reputations are built from them. The server keeps the
+    // full history.
+    final cutoff = now.subtract(const Duration(days: 60));
     final stale = {
       for (final hazard in _hazards.values)
         if (!assess(hazard).status.isActive && assess(hazard).expiresAt.isBefore(cutoff)) hazard.id,
@@ -222,4 +283,17 @@ class HazardRepository extends ChangeNotifier {
     await prefs.setStringList(_kOutbox, _outbox.toList());
     await prefs.setInt(_kCursor, _cursor);
   }
+}
+
+/// Other people confirmed one of this device's reports.
+class ThankYou {
+  const ThankYou({required this.hazard, required this.confirmations, required this.multiplier});
+
+  final Hazard hazard;
+
+  /// How many other devices have now confirmed it.
+  final int confirmations;
+
+  /// This device's current vote weight, to show the reward.
+  final double multiplier;
 }

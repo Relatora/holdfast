@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -33,6 +35,8 @@ class AppSettings extends ChangeNotifier {
   static const _kHazardCategories = 'hazardCategories';
   static const _kNuclearView = 'nuclearView';
   static const _kFetchWind = 'fetchWind';
+  static const _kTrainingStars = 'trainingStars';
+  static const _kCelebrated = 'celebratedAchievements';
   static const _kDeviceId = 'deviceId';
 
   final SharedPreferences _prefs;
@@ -94,6 +98,28 @@ class AppSettings extends ChangeNotifier {
     _prefs.setBool(_kFetchWind, value);
     notifyListeners();
   }
+
+  /// Best stars (1-3) per training scenario finished, by scenario id.
+  Map<String, int> get trainingStars {
+    final raw = _prefs.getString(_kTrainingStars);
+    if (raw == null) return {};
+    return (jsonDecode(raw) as Map).map((k, v) => MapEntry(k as String, (v as num).toInt()));
+  }
+
+  /// Records [stars] for a scenario, keeping the best result.
+  void recordTraining(String scenarioId, int stars) {
+    final all = trainingStars;
+    if ((all[scenarioId] ?? 0) >= stars) return;
+    all[scenarioId] = stars;
+    _prefs.setString(_kTrainingStars, jsonEncode(all));
+    notifyListeners();
+  }
+
+  /// Achievements whose unlock has already been celebrated, so the badge
+  /// pop plays once.
+  Set<String> get celebratedAchievements => (_prefs.getStringList(_kCelebrated) ?? const []).toSet();
+  void markCelebrated(Iterable<String> ids) =>
+      _prefs.setStringList(_kCelebrated, {...celebratedAchievements, ...ids}.toList());
 
   /// Which effect rings nuclear detonation reports draw on the map.
   NuclearView get nuclearView => NuclearView.values.asNameMap()[_prefs.getString(_kNuclearView)] ?? NuclearView.human;

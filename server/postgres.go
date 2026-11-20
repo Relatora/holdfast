@@ -9,8 +9,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Migrations, applied in order on every start; each must be idempotent.
+//
 //go:embed migrations/001_events.sql
 var schemaSQL string
+
+//go:embed migrations/002_credential_kind.sql
+var credentialKindSQL string
 
 // PostgresStore is the production store: PostgreSQL with PostGIS, so
 // "events for hazards in this map area" is an indexed spatial query rather
@@ -25,9 +30,11 @@ func NewPostgresStore(ctx context.Context, url string) (*PostgresStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
-	if _, err := pool.Exec(ctx, schemaSQL); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("migrate: %w", err)
+	for _, migration := range []string{schemaSQL, credentialKindSQL} {
+		if _, err := pool.Exec(ctx, migration); err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("migrate: %w", err)
+		}
 	}
 	return &PostgresStore{pool: pool}, nil
 }
