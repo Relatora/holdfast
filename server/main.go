@@ -15,6 +15,9 @@
 //	PREPARE_MAX_BYTES  largest region built on demand (default 8 GB)
 //	REFRESH_DAYS       rebuild hosted regions older than this many days from
 //	                   fresh data (default 30; 0 turns automatic refresh off)
+//
+// The newest Protomaps planet build is looked up twice a day and listed in
+// index.json (see planet.go). PLANET_BUILDS=off leaves it out.
 package main
 
 import (
@@ -51,6 +54,9 @@ func main() {
 	}
 
 	server := &Server{store: store, regionsDir: regionsDir}
+	if os.Getenv("PLANET_BUILDS") != "off" {
+		server.planet = NewPlanetSource(ctx, planetBuildsURL, 12*time.Hour)
+	}
 	catalogPath := envOr("CATALOG", "../assets/regions/catalog.json")
 	if catalog, err := LoadCatalog(catalogPath); err != nil {
 		log.Printf("on-demand region preparation off: %v", err)

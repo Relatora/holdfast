@@ -27,6 +27,9 @@ type Server struct {
 	// preparer builds missing regions on demand; nil turns that off (for
 	// example when the catalog file can't be found).
 	preparer *Preparer
+	// planet names the newest Protomaps planet build; nil leaves it out of
+	// index.json (apps then use the catalog's URL).
+	planet *PlanetSource
 }
 
 // Routes wires every endpoint, wrapped in CORS so the web build can call
@@ -221,7 +224,11 @@ func (s *Server) regionIndex(w http.ResponseWriter, _ *http.Request) {
 		prepare = map[string]any{"enabled": true, "maxBytes": s.preparer.MaxBytes()}
 		jobs = s.preparer.Active()
 	}
-	writeJSON(w, map[string]any{"regions": regions, "prepare": prepare, "jobs": jobs})
+	body := map[string]any{"regions": regions, "prepare": prepare, "jobs": jobs}
+	if s.planet != nil && s.planet.URL() != "" {
+		body["planet"] = s.planet.URL()
+	}
+	writeJSON(w, body)
 }
 
 var regionID = regexp.MustCompile(`^[a-z0-9-]+$`)

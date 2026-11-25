@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -174,5 +175,42 @@ func TestCredentialsOnlyReachAppsThatAskForThem(t *testing.T) {
 	}
 	if n := count("&kinds=report,vote,credential"); n != 2 {
 		t.Errorf("a new app got %d events, want 2", n)
+	}
+}
+
+func TestIndexNamesTheNewestPlanetBuild(t *testing.T) {
+	builds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("User-Agent") != "holdfast-server" {
+			http.Error(w, "forbidden", http.StatusForbidden) // as the real list does
+			return
+		}
+		w.Write([]byte(`[{"key":"20231023.pmtiles"},{"key":"20261123.pmtiles"},{"key":"20261124.pmtiles"}]`))
+	}))
+	t.Cleanup(builds.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	planet := &PlanetSource{buildsURL: builds.URL, client: builds.Client()}
+	if err := planet.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer((&Server{store: NewMemoryStore(), regionsDir: t.TempDir(), planet: planet}).Routes())
+	t.Cleanup(ts.Close)
+
+	resp, _ := http.Get(ts.URL + "/regions/index.json")
+	index := decode[struct {
+		Planet string `json:"planet"`
+	}](t, resp)
+	if index.Planet != "https://build.protomaps.com/20261124.pmtiles" {
+		t.Fatalf("planet = %q", index.Planet)
+	}
+
+	// A failed refresh keeps the last good answer.
+	builds.Close()
+	if err := planet.Refresh(ctx); err == nil {
+		t.Fatal("expected an error with the list unreachable")
+	}
+	if planet.URL() != "https://build.protomaps.com/20261124.pmtiles" {
+		t.Fatalf("lost the planet URL after a failed refresh: %q", planet.URL())
 	}
 }
