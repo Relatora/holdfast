@@ -14,6 +14,7 @@ import 'config.dart';
 import 'favorites/favorites_store.dart';
 import 'hazards/hazard_repository.dart';
 import 'net/network_gate.dart';
+import 'location/locator.dart';
 import 'notify/notifications.dart';
 import 'regions/region_files.dart';
 import 'regions/region_store.dart';
@@ -78,6 +79,8 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: favorites),
         ChangeNotifierProvider.value(value: regions),
         ChangeNotifierProvider.value(value: hazards),
+        // One locator for the whole app, so the dot survives screen changes.
+        ChangeNotifierProvider(create: (_) => DeviceLocator()),
         Provider<Notifications>.value(value: notifications),
       ],
       child: HoldfastApp(navigatorKey: navigator),

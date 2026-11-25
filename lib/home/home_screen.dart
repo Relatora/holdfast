@@ -15,11 +15,14 @@ import '../hazards/hazard_filter.dart';
 import '../hazards/hazard_repository.dart';
 import '../hazards/hazard_sheets.dart';
 import '../hazards/hazards_sheet.dart';
+import '../location/locate_flow.dart';
+import '../location/locator.dart';
 import '../reputation/achievement_badge.dart';
 import '../reputation/achievements.dart';
 import '../reputation/my_reporting_screen.dart';
 import '../map/basemap_layer.dart';
 import '../map/hazard_marker.dart';
+import '../map/location_layer.dart';
 import '../map/poi_marker.dart';
 import '../map/radar_sweep.dart';
 import '../map/saved_area_layers.dart';
@@ -121,7 +124,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return region == null ? null : _regions.sidePack(region, SidePack.routing);
     },
     mapCenter: () => _map.camera.center,
+    // Start from the dot on the map when there is a fresh one; otherwise
+    // try GPS quietly (no sheet: the panel falls back to the map centre).
+    locate: () async {
+      if (_locator.recent() case final fix?) return fix.at;
+      return switch (await _locator.gps()) {
+        Located(:final fix) => fix.at,
+        LocateFailed() => null,
+      };
+    },
   )..addListener(_onDirectionsChanged);
+
+  /// Finds the device for the location button, the dot and directions.
+  /// Shared through the app when provided; tests get a private one.
+  late final DeviceLocator _locator = context.read<DeviceLocator?>() ?? DeviceLocator();
   RoutePlan? _shownPlan;
   late final HazardRepository _hazardRepo = context.read<HazardRepository>();
 
@@ -132,6 +148,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     // New or expired hazard reports change what a route should avoid.
     _hazardRepo.addListener(_onHazardsChanged);
     _hazardRepo.thanks.addListener(_onThanks);
+    _locator.addListener(_onLocatorChanged);
     // The store may have finished loading before this screen subscribed, in
     // which case no notification is coming; check its current state once.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -145,6 +162,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _regions.removeListener(_onRegionsChanged);
     _hazardRepo.removeListener(_onHazardsChanged);
     _hazardRepo.thanks.removeListener(_onThanks);
+    _locator.removeListener(_onLocatorChanged);
     _directions.dispose();
     _dropTimer?.cancel();
     _viewportDebounce?.cancel();
@@ -421,6 +439,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _zoomFlight = _flight;
   }
 
+  void _onLocatorChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// The location button: find the device (asking for whatever is needed
+  /// on the way) and fly there, close enough to see the whole error circle.
+  Future<void> _goToMyLocation() async {
+    if (_locator.busy) return;
+    final fix = await locateMe(context, _locator);
+    if (fix == null || !mounted) return;
+    // A GPS fix: street level. A rough one: wide enough to show its circle
+    // (about 16 at 100 m, one zoom level out per doubling).
+    final fitZoom = (16 - math.log(math.max(fix.accuracyMeters, 100) / 100) / math.ln2).clamp(9.0, 17.0);
+    _flyTo(fix.at, fix.approximate ? fitZoom : math.max(_map.camera.zoom, math.min(fitZoom, 16.5)));
+  }
+
   /// Where the last zoom-button animation ([_zoomFlight]) is heading.
   double? _zoomTarget;
   AnimationController? _zoomFlight;
@@ -687,6 +721,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                 ],
               ),
+              // Last, so your own position is never hidden under a pin.
+              ...locationLayers(_locator.last, scheme),
             ],
           ),
 
@@ -744,6 +780,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 10),
                 ZoomButtons(onZoomIn: () => _zoomBy(1), onZoomOut: () => _zoomBy(-1)),
+                const SizedBox(height: 10),
+                MyLocationButton(
+                  busy: _locator.busy,
+                  located: _locator.last != null,
+                  onPressed: _goToMyLocation,
+                ),
               ],
             ),
           ),
