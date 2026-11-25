@@ -68,7 +68,7 @@ class Achievement {
 
 /// Number of training scenarios; kept here so the badge rule doesn't depend
 /// on the training UI.
-int trainingScenarioCount = 8;
+int trainingScenarioCount = 9;
 
 final achievements = <Achievement>[
   Achievement(

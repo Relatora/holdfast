@@ -5,6 +5,7 @@ library;
 
 import 'package:material_ui/material_ui.dart' show IconData;
 
+import '../contamination/contaminants.dart';
 import '../hazards/hazard.dart';
 import '../pois/poi.dart';
 import 'training_hooks.dart';
@@ -56,6 +57,23 @@ class ScriptedVotes extends ScriptedEvent {
   final int count;
 }
 
+/// A pretend neighbour adds a soil or radiation reading [meters] away at
+/// [bearing] from the scenario's centre.
+class ScriptedSample extends ScriptedEvent {
+  const ScriptedSample({
+    required Duration at,
+    required String notice,
+    required this.contaminant,
+    required this.value,
+    required this.bearing,
+    required this.meters,
+  }) : super(at, notice);
+
+  final Contaminant contaminant;
+  final double value;
+  final double bearing, meters;
+}
+
 /// A plain notice: a weather update, an official instruction.
 class ScriptedNotice extends ScriptedEvent {
   const ScriptedNotice({required Duration at, required String notice}) : super(at, notice);
@@ -84,6 +102,10 @@ Objective filterTo(HazardCategory category, String text) =>
 Objective routeAround(String text) =>
     Objective(text, (a) => a is PlannedRoute && a.plan.avoided > 0 && !a.plan.throughHazard);
 Objective readRings(String text) => Objective(text, (a) => a is ViewedNuclearRings);
+Objective findMe(String text) => Objective(text, (a) => a is FoundMyLocation);
+Objective openReading(String text) => Objective(text, (a) => a is OpenedSample);
+Objective addReading(Contaminant contaminant, String text) =>
+    Objective(text, (a) => a is AddedSample && a.contaminant == contaminant);
 
 class Scenario {
   const Scenario({

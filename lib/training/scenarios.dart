@@ -4,6 +4,7 @@ library;
 
 import 'package:material_ui/material_ui.dart';
 
+import '../contamination/contaminants.dart';
 import '../hazards/hazard.dart';
 import '../hazards/hazard_details.dart';
 import '../pois/poi.dart';
@@ -197,6 +198,54 @@ final scenarios = <Scenario>[
     objectives: [
       open(HazardType.tsunami, 'Open the tsunami report and read what to do.'),
       routeAround('Plan a walking route away from the danger zone.'),
+    ],
+  ),
+  // Modelled on the U.S. Army's November 2026 detonation of degraded lead
+  // azide at the Iowa Army Ammunition Plant: a planned release, a
+  // downwind evacuation cone, shelter in place beyond it, and lead that
+  // settles into soil for decades.
+  Scenario(
+    id: 'leadDustRelease',
+    title: 'Lead dust release',
+    icon: Icons.grain_rounded,
+    briefing: 'The army is about to detonate an old store of lead-based explosive 3 km north-east of you. '
+        'The wind will carry lead dust your way for tens of kilometres.',
+    lesson: 'For lead dust: shelter in place with windows shut and ventilation on recirculate, and keep '
+        'children under 6 and pregnant women inside. Afterwards wet-clean, never sweep, and test the soil '
+        'before children play or you grow food. A blood lead test shows exposure from about the past month.',
+    par: _s(180),
+    events: [
+      ScriptedReport(
+        at: _s(3),
+        notice: 'Planned: a controlled detonation of lead-based explosive, upwind of you.',
+        ref: 'lead',
+        type: HazardType.leadDust,
+        bearing: 45,
+        meters: 3000,
+        details: {
+          'wind': {'from': 45.0, 'kmh': 13.0, 'source': 'forecast'},
+        },
+      ),
+      ScriptedVotes(at: _s(6), notice: 'Officials confirmed the release.', ref: 'lead', kind: VoteKind.confirm, count: 3),
+      ScriptedNotice(at: _s(25), notice: 'The detonation has happened. Dust is drifting your way: shelter in place.'),
+      // Neighbours' soil tests: high along the plume, low upwind and to the side.
+      ScriptedSample(at: _s(40), notice: 'Neighbours have tested their soil. Readings are on the map.',
+          contaminant: Contaminant.lead, value: 1400, bearing: 45, meters: 2200),
+      ScriptedSample(at: _s(40), notice: 'Neighbours have tested their soil. Readings are on the map.',
+          contaminant: Contaminant.lead, value: 850, bearing: 45, meters: 1400),
+      ScriptedSample(at: _s(40), notice: 'Neighbours have tested their soil. Readings are on the map.',
+          contaminant: Contaminant.lead, value: 310, bearing: 50, meters: 600),
+      ScriptedSample(at: _s(40), notice: 'Neighbours have tested their soil. Readings are on the map.',
+          contaminant: Contaminant.lead, value: 70, bearing: 135, meters: 1200),
+      ScriptedSample(at: _s(40), notice: 'Neighbours have tested their soil. Readings are on the map.',
+          contaminant: Contaminant.lead, value: 40, bearing: 225, meters: 900),
+    ],
+    objectives: [
+      open(HazardType.leadDust, 'Open the release and see where the dust will drift.'),
+      findMe('Find your own location on the map.'),
+      routeAround('Plan a route that keeps out of the dust plume.'),
+      openReading("Open a neighbour's soil reading and read what it means."),
+      addReading(Contaminant.lead, 'Test your own yard: add a lead reading where you are.'),
     ],
   ),
   Scenario(
