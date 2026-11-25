@@ -130,9 +130,11 @@ func TestRegionFilesSupportRangeRequests(t *testing.T) {
 
 	resp, _ = http.Get(ts.URL + "/regions/index.json")
 	index := decode[struct {
-		Regions map[string]map[string]int64 `json:"regions"`
+		Regions map[string]struct {
+			PmtilesBytes int64 `json:"pmtilesBytes"`
+		} `json:"regions"`
 	}](t, resp)
-	if index.Regions["ottawa"]["pmtilesBytes"] != 1000 {
+	if index.Regions["ottawa"].PmtilesBytes != 1000 {
 		t.Fatalf("index = %v", index)
 	}
 }

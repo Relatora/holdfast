@@ -13,6 +13,8 @@
 //	TOOLS_DIR          the repo's tool/ directory (default ../tool)
 //	PYTHON             Python interpreter for the tools (default python)
 //	PREPARE_MAX_BYTES  largest region built on demand (default 8 GB)
+//	REFRESH_DAYS       rebuild hosted regions older than this many days from
+//	                   fresh data (default 30; 0 turns automatic refresh off)
 package main
 
 import (
@@ -64,6 +66,15 @@ func main() {
 		}
 		server.preparer = NewPreparer(ctx, regionsDir, catalog, builder, maxBytes)
 		log.Printf("preparing regions up to %d MB on demand", maxBytes/1e6)
+
+		days, err := strconv.Atoi(envOr("REFRESH_DAYS", "30"))
+		if err != nil || days < 0 {
+			log.Fatalf("REFRESH_DAYS must be a whole number of days, 0 or more")
+		}
+		if days > 0 {
+			go server.preparer.AutoRefresh(ctx, time.Duration(days)*24*time.Hour, time.Hour)
+			log.Printf("refreshing hosted regions older than %d days", days)
+		}
 	}
 
 	srv := &http.Server{

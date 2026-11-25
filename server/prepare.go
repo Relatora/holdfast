@@ -14,9 +14,15 @@ package main
 //	tool/build_population.py cuts the GHSL population grid for casualty estimates
 //
 // Jobs run one at a time: each is bandwidth-bound, so running two at once
-// would only make both slower. Both tools write to "<file>.part" and rename
+// would only make both slower. Every tool writes to "<file>.part" and renames
 // when complete, so the file server (which only serves complete names) never
 // hands out half a region.
+//
+// Hosted regions age: OpenStreetMap changes every day. A refresh job rebuilds
+// a hosted region from fresh data while the old files keep being served, and
+// the server can refresh regions older than REFRESH_DAYS by itself (see
+// AutoRefresh). Apps compare each region's builtAt in index.json with their
+// own copy to offer the update.
 
 import (
 	"context"
@@ -29,6 +35,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // CatalogRegion is the part of an assets/regions/catalog.json entry the
@@ -84,6 +91,8 @@ type Job struct {
 	Error      string `json:"error,omitempty"`
 	// Note explains a partial success, e.g. a map without a supply list.
 	Note string `json:"note,omitempty"`
+	// Refresh is true for a rebuild of a region that was already hosted.
+	Refresh bool `json:"refresh,omitempty"`
 }
 
 // Builder produces a region's files in the regions directory. The real one
@@ -103,6 +112,7 @@ var (
 	errUnknownRegion = errors.New("unknown region")
 	errTooBig        = errors.New("too big to prepare on demand")
 	errStreamed      = errors.New("this region streams from its own source")
+	errNotHosted     = errors.New("not hosted yet; prepare it instead")
 )
 
 // Preparer queues and runs preparation jobs.
@@ -115,14 +125,18 @@ type Preparer struct {
 	mu    sync.Mutex
 	jobs  map[string]*Job
 	queue chan string
+	// lastAutoRefresh is when AutoRefresh last queued each region, so a
+	// region whose refresh keeps failing is retried daily, not hourly.
+	lastAutoRefresh map[string]time.Time
 }
 
 // NewPreparer starts the worker; it stops when ctx is cancelled.
 func NewPreparer(ctx context.Context, dir string, catalog map[string]CatalogRegion, builder Builder, maxBytes int64) *Preparer {
 	p := &Preparer{
 		dir: dir, catalog: catalog, builder: builder, maxBytes: maxBytes,
-		jobs:  map[string]*Job{},
-		queue: make(chan string, len(catalog)+1),
+		jobs:            map[string]*Job{},
+		queue:           make(chan string, len(catalog)+1),
+		lastAutoRefresh: map[string]time.Time{},
 	}
 	go p.work(ctx)
 	return p
@@ -135,14 +149,9 @@ func (p *Preparer) MaxBytes() int64 { return p.maxBytes }
 // Asking again after a failure retries. Asking for a region that is already
 // hosted reports it as done without rebuilding.
 func (p *Preparer) Start(id string) (Job, error) {
-	region, ok := p.catalog[id]
-	switch {
-	case !ok:
-		return Job{}, errUnknownRegion
-	case region.RemoteURL != "":
-		return Job{}, errStreamed
-	case region.ApproxBytes > p.maxBytes:
-		return Job{}, errTooBig
+	region, err := p.buildable(id)
+	if err != nil {
+		return Job{}, err
 	}
 
 	p.mu.Lock()
@@ -157,6 +166,113 @@ func (p *Preparer) Start(id string) (Job, error) {
 	p.jobs[id] = job
 	p.queue <- id
 	return p.snapshot(job), nil
+}
+
+// Refresh queues a rebuild of a hosted region from fresh data, or returns
+// the job already queued or running for it. The old files stay in place
+// (and keep being served) until each new one is complete.
+func (p *Preparer) Refresh(id string) (Job, error) {
+	region, err := p.buildable(id)
+	if err != nil {
+		return Job{}, err
+	}
+	if !p.exists(region.ID + ".pmtiles") {
+		return Job{}, errNotHosted
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if job, ok := p.jobs[id]; ok && (job.State == JobQueued || job.State == JobRunning) {
+		return p.snapshot(job), nil
+	}
+	job := &Job{RegionID: id, State: JobQueued, BytesTotal: region.ApproxBytes, Refresh: true}
+	p.jobs[id] = job
+	p.queue <- id
+	return p.snapshot(job), nil
+}
+
+// buildable checks that id is a region this server may build at all.
+func (p *Preparer) buildable(id string) (CatalogRegion, error) {
+	region, ok := p.catalog[id]
+	switch {
+	case !ok:
+		return region, errUnknownRegion
+	case region.RemoteURL != "":
+		return region, errStreamed
+	case region.ApproxBytes > p.maxBytes:
+		return region, errTooBig
+	}
+	return region, nil
+}
+
+// AutoRefresh refreshes hosted regions built more than maxAge ago, checking
+// every interval until ctx is cancelled. Jobs still run one at a time, so a
+// server with many stale regions works through them in turn.
+func (p *Preparer) AutoRefresh(ctx context.Context, maxAge, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		for _, id := range p.refreshDue(time.Now(), maxAge) {
+			log.Printf("refresh %s: built more than %s ago", id, maxAge)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// refreshDue queues a refresh of every hosted region built before
+// now-maxAge and returns their ids. A region queued in the last day is
+// skipped: if its refresh failed (the planet build or Overpass was down),
+// trying again every hour would only add load to a struggling service.
+func (p *Preparer) refreshDue(now time.Time, maxAge time.Duration) []string {
+	var due []string
+	for id := range p.catalog {
+		built := BuiltAt(p.dir, id)
+		if built.IsZero() || now.Sub(built) < maxAge {
+			continue
+		}
+		p.mu.Lock()
+		recent := now.Sub(p.lastAutoRefresh[id]) < 24*time.Hour
+		p.mu.Unlock()
+		if recent {
+			continue
+		}
+		if _, err := p.Refresh(id); err != nil {
+			continue // streamed, or now too big for this server
+		}
+		p.mu.Lock()
+		p.lastAutoRefresh[id] = now
+		p.mu.Unlock()
+		due = append(due, id)
+	}
+	return due
+}
+
+// BuiltAt is when a hosted region's files last changed: the newest
+// modification time among them, or zero if the region isn't hosted.
+func BuiltAt(dir, id string) time.Time {
+	var newest time.Time
+	for _, name := range regionFiles(id) {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			if name == id+".pmtiles" {
+				return time.Time{} // no map, no region
+			}
+			continue
+		}
+		if t := info.ModTime(); t.After(newest) {
+			newest = t
+		}
+	}
+	return newest
+}
+
+// regionFiles names every file a region can have, the map first.
+func regionFiles(id string) []string {
+	return []string{id + ".pmtiles", id + ".pois.json", id + ".routing.bin", id + ".population.bin"}
 }
 
 // Status reports the job for id. ok is false when there has been no job.
@@ -177,7 +293,11 @@ func (p *Preparer) Active() map[string]Job {
 	defer p.mu.Unlock()
 	out := map[string]Job{}
 	for id, j := range p.jobs {
-		if j.State != JobDone {
+		// Refreshes are left out: an app resumes every listed job by
+		// downloading its region, and nobody asked for a refreshed one.
+		// The old files stay hosted throughout, so there is nothing to wait
+		// for; apps see the result as a newer builtAt.
+		if j.State != JobDone && !j.Refresh {
 			out[id] = p.snapshot(j)
 		}
 	}
@@ -244,7 +364,14 @@ func (p *Preparer) work(ctx context.Context) {
 }
 
 func (p *Preparer) run(ctx context.Context, region CatalogRegion) {
-	if p.exists(region.ID + ".pmtiles") {
+	p.mu.Lock()
+	refresh := p.jobs[region.ID].Refresh
+	p.mu.Unlock()
+	// A refresh rebuilds everything that comes from OpenStreetMap. The
+	// population grid comes from a fixed GHSL release, so it is kept.
+	stale := func(name string) bool { return refresh || !p.exists(name) }
+
+	if !stale(region.ID + ".pmtiles") {
 		log.Printf("prepare %s: map already built", region.ID)
 	} else {
 		p.update(region.ID, func(j *Job) { j.State, j.Step = JobRunning, "map" })
@@ -257,7 +384,7 @@ func (p *Preparer) run(ctx context.Context, region CatalogRegion) {
 	}
 
 	var notes []string
-	if wantsSupplies(region) && !p.exists(region.ID+".pois.json") {
+	if wantsSupplies(region) && stale(region.ID+".pois.json") {
 		p.update(region.ID, func(j *Job) { j.State, j.Step, j.BytesDone = JobRunning, "supplies", j.BytesTotal })
 		log.Printf("prepare %s: importing supply locations", region.ID)
 		if err := p.builder.BuildPois(ctx, region); err != nil {
@@ -268,7 +395,7 @@ func (p *Preparer) run(ctx context.Context, region CatalogRegion) {
 		notes = append(notes, "Supply lists are only built for cities and provinces.")
 	}
 
-	if wantsRoutes(region) && !p.exists(region.ID+".routing.bin") {
+	if wantsRoutes(region) && stale(region.ID+".routing.bin") {
 		p.update(region.ID, func(j *Job) { j.State, j.Step, j.BytesDone = JobRunning, "routes", j.BytesTotal })
 		log.Printf("prepare %s: building the routing network", region.ID)
 		if err := p.builder.BuildRoutes(ctx, region); err != nil {
