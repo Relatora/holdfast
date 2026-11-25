@@ -25,6 +25,7 @@ import 'regions/update_watcher.dart';
 import 'reputation/my_reporting_screen.dart';
 import 'settings/app_settings.dart';
 import 'sync/sync_client.dart';
+import 'pois/known_airports.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,12 +58,14 @@ Future<void> main() async {
       WidgetsBinding.instance.addPostFrameCallback((_) => open(kind));
       return;
     }
-    state.push(MaterialPageRoute<void>(
-      builder: (_) => switch (kind) {
-        NoticeKind.mapUpdates => const RegionsScreen(),
-        NoticeKind.thanks => const MyReportingScreen(),
-      },
-    ));
+    state.push(
+      MaterialPageRoute<void>(
+        builder: (_) => switch (kind) {
+          NoticeKind.mapUpdates => const RegionsScreen(),
+          NoticeKind.thanks => const MyReportingScreen(),
+        },
+      ),
+    );
   }
 
   final notifications = await SystemNotifications.start(onTap: open);
@@ -71,19 +74,23 @@ Future<void> main() async {
   // hears, placed with the downloaded maps' tower packs. Read from the
   // device only: positioning must never wait on the network.
   final locator = DeviceLocator()
-    ..addRoughSource(TowerLocator(loadPacks: () async {
-      final packs = <CellPack>[];
-      for (final region in regions.readyRegions) {
-        try {
-          if (await regions.files.readPack(region.id, SidePack.cells) case final bytes?) {
-            packs.add(CellPack.decode(bytes));
+    ..addRoughSource(
+      TowerLocator(
+        loadPacks: () async {
+          final packs = <CellPack>[];
+          for (final region in regions.readyRegions) {
+            try {
+              if (await regions.files.readPack(region.id, SidePack.cells) case final bytes?) {
+                packs.add(CellPack.decode(bytes));
+              }
+            } on Object catch (error) {
+              debugPrint('Cell-tower pack for ${region.id} unreadable: $error');
+            }
           }
-        } on Object catch (error) {
-          debugPrint('Cell-tower pack for ${region.id} unreadable: $error');
-        }
-      }
-      return packs;
-    }).locate);
+          return packs;
+        },
+      ).locate,
+    );
 
   // Regions finish loading in the background (the server check can be
   // slow); the home screen shows the map as soon as local state is ready.
@@ -101,6 +108,8 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: hazards),
         // One locator for the whole app, so the dot survives screen changes.
         ChangeNotifierProvider.value(value: locator),
+        // The active map's airports, for the hazard sheets.
+        ChangeNotifierProvider(create: (_) => KnownAirports()),
         Provider<Notifications>.value(value: notifications),
       ],
       child: HoldfastApp(navigatorKey: navigator, showIntro: settings.showIntro),

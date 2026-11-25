@@ -6,6 +6,8 @@
 /// one without losing them.
 library;
 
+import 'dart:math' as math;
+
 import 'hazard.dart';
 
 /// Wind at the hazard: where it blows *from* and how hard. Meteorological
@@ -173,6 +175,45 @@ class NuclearDetails {
   }
 }
 
+/// How deep the water is where a tsunami travels, which sets its speed:
+/// a wave moves at about the square root of (gravity × depth), so the same
+/// wave crosses deep ocean at jet speed and slows to a run near shore.
+enum TsunamiDepth {
+  deepOcean('Deep ocean', 4000),
+  shelf('Continental shelf', 200),
+  shallow('Lake or shallow coast', 50);
+
+  const TsunamiDepth(this.label, this.meters);
+  final String label;
+  final double meters;
+
+  /// Wave speed in m/s (shallow-water wave speed, √(g·d)).
+  double get speedMetersPerSecond => math.sqrt(9.81 * meters);
+  double get speedKmh => speedMetersPerSecond * 3.6;
+}
+
+/// A tsunami report placed at the wave's origin (an undersea earthquake or
+/// landslide), with the water depth its speed depends on. Reports without
+/// it are about the wave arriving somewhere, and draw no arrival rings.
+class TsunamiDetails {
+  const TsunamiDetails({required this.depth});
+  final TsunamiDepth depth;
+
+  /// Minutes after the event that the arrival rings show.
+  static const ringMinutes = [10, 30, 60, 120];
+
+  /// How far the first wave has travelled after [minutes].
+  double reachMeters(int minutes) => depth.speedMetersPerSecond * minutes * 60;
+
+  Map<String, Object?> toJson() => {'depth': depth.name};
+
+  static TsunamiDetails? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final depth = TsunamiDepth.values.asNameMap()[raw['depth']];
+    return depth == null ? null : TsunamiDetails(depth: depth);
+  }
+}
+
 /// Where a report's facts come from when it isn't a first-hand sighting:
 /// an official advisory, a news report. Shown with a link so people can
 /// read the original. A source is a citation, not a verification: sourced
@@ -218,6 +259,7 @@ extension HazardDetailsX on Hazard {
   RadiationDetails? get radiation => RadiationDetails.fromJson(details['radiation']);
   NuclearDetails? get nuclear => NuclearDetails.fromJson(details['nuclear']);
   ReportSource? get source => ReportSource.fromJson(details['source']);
+  TsunamiDetails? get tsunami => TsunamiDetails.fromJson(details['tsunami']);
 }
 
 /// Builds the details map for a new report.
@@ -227,6 +269,7 @@ Map<String, Object?> hazardDetails({
   NuclearDetails? nuclear,
   DateTime? startsAt,
   ReportSource? source,
+  TsunamiDetails? tsunami,
 }) =>
     {
       if (wind != null) 'wind': wind.toJson(),
@@ -234,4 +277,5 @@ Map<String, Object?> hazardDetails({
       if (radiation != null) 'radiation': radiation.toJson(),
       if (nuclear != null) 'nuclear': nuclear.toJson(),
       if (source != null) 'source': source.toJson(),
+      if (tsunami != null) 'tsunami': tsunami.toJson(),
     };

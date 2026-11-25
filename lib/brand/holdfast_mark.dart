@@ -100,11 +100,12 @@ class HoldfastMarkPainter extends CustomPainter {
         _background(canvas);
         _contours(canvas);
       case MarkLayers.foreground:
-        // Android keeps the middle 66 % of a 108 dp adaptive icon always
-        // visible; the cage fits well inside it.
-        _cageAndBeacon(canvas, scale: 0.72);
+        // Android shows only the middle 66 % circle of a 108 dp adaptive
+        // icon. Enlarged to fill it, and lifted so the dome (whose weight
+        // sits low) is centred in the circle with its base line inside.
+        _cageAndBeacon(canvas, scale: 0.8, lift: 0.06);
       case MarkLayers.monochrome:
-        _cageAndBeacon(canvas, scale: 0.72, flat: Colors.white);
+        _cageAndBeacon(canvas, scale: 0.8, lift: 0.06, flat: Colors.white);
       case MarkLayers.splash:
         _contours(canvas);
         _cageAndBeacon(canvas, scale: 1);
@@ -164,11 +165,12 @@ class HoldfastMarkPainter extends CustomPainter {
   }
 
   /// The beacon under a lattice dome standing on a base line. [scale]
-  /// shrinks it about the centre (for the adaptive icon's safe zone);
-  /// [flat] draws everything in one colour (the themed icon).
-  void _cageAndBeacon(Canvas canvas, {required double scale, Color? flat}) {
+  /// shrinks it about the centre and [lift] moves it up (for the adaptive
+  /// icon's visible circle); [flat] draws everything in one colour (the
+  /// themed icon).
+  void _cageAndBeacon(Canvas canvas, {required double scale, double lift = 0, Color? flat}) {
     canvas.save();
-    canvas.translate(0.5, 0.5);
+    canvas.translate(0.5, 0.5 - lift);
     canvas.scale(scale);
     canvas.translate(-0.5, -0.5);
 

@@ -23,6 +23,7 @@ import 'routing_graph.dart';
 /// The nuclear and radiation figures are a floor: once effect rings and
 /// wind plumes exist for a report, those shapes are avoided as well.
 double avoidRadiusMeters(HazardType type) => switch (type) {
+      HazardType.volcanicEruption => 10000,
       HazardType.nuclearDetonation => 5000,
       HazardType.volcanicAsh => 2000,
       // The Army's 2026 Iowa lead azide detonation evacuated a 5-mile

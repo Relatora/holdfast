@@ -47,6 +47,11 @@ enum HazardType {
   police('Police activity', Duration(hours: 6), HazardCategory.people),
   peopleHurt('People hurt', Duration(hours: 6), HazardCategory.people),
   volcanicAsh('Volcanic ash', Duration(days: 3), HazardCategory.geological),
+
+  /// An eruption at a vent: a danger zone around it (falling rock,
+  /// pyroclastic flows) and an ash plume downwind. Ash reported away from
+  /// the volcano stays [volcanicAsh].
+  volcanicEruption('Volcanic eruption', Duration(days: 7), HazardCategory.geological),
   lava('Lava flow', Duration(days: 14), HazardCategory.geological),
   tsunami('Tsunami', Duration(hours: 24), HazardCategory.water),
   nuclearDetonation('Nuclear detonation', Duration(days: 30), HazardCategory.chemical),
@@ -74,6 +79,7 @@ enum HazardType {
         HazardType.gasLeak ||
         HazardType.chemicalSpill ||
         HazardType.volcanicAsh ||
+        HazardType.volcanicEruption ||
         HazardType.nuclearDetonation ||
         HazardType.radiation ||
         HazardType.leadDust =>

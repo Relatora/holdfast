@@ -2,13 +2,27 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../favorites/star_button.dart';
+import '../hazards/aviation_impact.dart';
+import '../map/hazard_marker.dart';
 import '../theme/motion.dart';
 import 'poi.dart';
 import 'poi_index.dart';
 
 /// Details for one supply location. [onDirections], when given, adds a
 /// Directions button that closes the sheet and plans a route there.
-Future<void> showPlaceSheet(BuildContext context, Poi poi, {double? meters, VoidCallback? onDirections}) {
+///
+/// For an airport, [impacts] are the hazards likely to close it, and
+/// [alternative] the nearest airport none of them reaches, opened with
+/// [onAlternative].
+Future<void> showPlaceSheet(
+  BuildContext context,
+  Poi poi, {
+  double? meters,
+  VoidCallback? onDirections,
+  List<AirportImpact> impacts = const [],
+  Poi? alternative,
+  VoidCallback? onAlternative,
+}) {
   return showModalBottomSheet<void>(
     context: context,
     builder: (context) {
@@ -45,6 +59,31 @@ Future<void> showPlaceSheet(BuildContext context, Poi poi, {double? meters, Void
                 StarButton(poi: poi),
               ],
             ),
+            for (final impact in impacts)
+              Card(
+                margin: const EdgeInsets.only(top: 12),
+                color: impact.hazard.type.color.withValues(alpha: 0.16),
+                child: ListTile(
+                  leading: Icon(impact.hazard.type.icon, color: impact.hazard.type.color),
+                  title: Text(impact.consequence),
+                  subtitle: Text('${impact.hazard.type.label} · ${impact.band.label.toLowerCase()}'),
+                ),
+              ),
+            if (impacts.isNotEmpty && alternative != null)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.flight_land_rounded),
+                title: Text('Nearest clear airport: ${alternative.title}'),
+                subtitle: Text('${formatDistance(distanceMeters(poi.latitude, poi.longitude, alternative.latitude, alternative.longitude))} '
+                    'from here. Airlifts may need to use it instead.'),
+                trailing: onAlternative == null ? null : const Icon(Icons.chevron_right_rounded),
+                onTap: onAlternative == null
+                    ? null
+                    : () {
+                        Navigator.pop(context);
+                        onAlternative();
+                      },
+              ),
             if (onDirections != null) ...[
               const SizedBox(height: 12),
               FilledButton.tonalIcon(
