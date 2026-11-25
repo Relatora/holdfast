@@ -7,12 +7,15 @@ import 'package:url_launcher/url_launcher.dart';
 import '../contamination/sample_sheet.dart';
 import '../map/hazard_marker.dart';
 import '../net/network_gate.dart';
+import '../pois/known_airports.dart';
+import '../pois/poi.dart' show distanceMeters;
 import '../reputation/achievement_badge.dart';
 import '../reputation/achievements.dart';
 import '../settings/app_settings.dart';
 import '../theme/motion.dart';
 import '../training/training_hooks.dart';
 import 'effects/nuclear_view.dart';
+import 'aviation_impact.dart';
 import 'effects/spread.dart';
 import 'hazard.dart';
 import 'hazard_details.dart';
@@ -25,13 +28,27 @@ import 'wind_service.dart';
 /// The flow is category → type → (type-specific details) → severity →
 /// note. Grouping by category keeps 16 hazard types from becoming a wall of
 /// chips, and the details only appear for the types that need them.
-Future<void> showReportHazardSheet(BuildContext context, {required double latitude, required double longitude}) {
+///
+/// [initialType] and [initialWind] come from the placement flow, which has
+/// already chosen what and where; a tsunami placed that way is at its
+/// origin out at sea ([tsunamiAtOrigin]).
+Future<void> showReportHazardSheet(
+  BuildContext context, {
+  required double latitude,
+  required double longitude,
+  HazardType? initialType,
+  Wind? initialWind,
+  bool tsunamiAtOrigin = false,
+}) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     builder: (_) => _ReportHazardSheet(
       latitude: latitude,
       longitude: longitude,
+      initialType: initialType,
+      initialWind: initialWind,
+      tsunamiAtOrigin: tsunamiAtOrigin,
       // Opened from the caller's context: this sheet is gone by then.
       onAddReading: () => showAddSampleSheet(context, latitude: latitude, longitude: longitude),
     ),
@@ -39,10 +56,20 @@ Future<void> showReportHazardSheet(BuildContext context, {required double latitu
 }
 
 class _ReportHazardSheet extends StatefulWidget {
-  const _ReportHazardSheet({required this.latitude, required this.longitude, required this.onAddReading});
+  const _ReportHazardSheet({
+    required this.latitude,
+    required this.longitude,
+    required this.onAddReading,
+    this.initialType,
+    this.initialWind,
+    this.tsunamiAtOrigin = false,
+  });
 
   final double latitude;
   final double longitude;
+  final HazardType? initialType;
+  final Wind? initialWind;
+  final bool tsunamiAtOrigin;
 
   /// Switches to the "Add a reading" sheet, for someone with a number
   /// rather than a sighting.
@@ -79,6 +106,26 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
   /// When a planned release happens (a controlled detonation or burn); null
   /// for something happening now.
   DateTime? _startsAt;
+
+  // Tsunami: reported where the wave starts (with the depth its speed
+  // depends on, for arrival rings) or where waves are hitting.
+  late bool _tsunamiOrigin = widget.tsunamiAtOrigin;
+  TsunamiDepth _tsunamiDepth = TsunamiDepth.deepOcean;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialType case final type?) {
+      _category = type.category;
+      _type = type;
+    }
+    if (widget.initialWind case final wind?) {
+      _withWind = true;
+      _windFrom = wind.fromDegrees;
+      _windKmh = wind.speedKmh.clamp(0, 100).toDouble();
+      _windSource = wind.source;
+    }
+  }
 
   Future<void> _pickStartsAt() async {
     final now = DateTime.now();
@@ -156,6 +203,7 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
             ? NuclearDetails(yieldKt: _yieldKt!, preset: _preset, burst: _burst)
             : null,
         startsAt: type.spreadsWithWind ? _startsAt : null,
+        tsunami: type == HazardType.tsunami && _tsunamiOrigin ? TsunamiDetails(depth: _tsunamiDepth) : null,
       );
 
   /// Severity the report carries: chosen by the reporter, except where the
@@ -257,6 +305,7 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
             // Step 3: details for the types that have them.
             if (type == HazardType.nuclearDetonation) ..._nuclearInputs(theme),
             if (type == HazardType.radiation) ..._radiationInputs(theme),
+            if (type == HazardType.tsunami) ..._tsunamiInputs(theme),
             if (type != null && type.spreadsWithWind) ...[
               const SizedBox(height: 12),
               _plannedInput(theme),
@@ -371,6 +420,42 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
               : 'Exploded at ground level: a smaller blast, but heavy fallout downwind.',
           style: theme.textTheme.bodySmall,
         ),
+      ];
+
+  List<Widget> _tsunamiInputs(ThemeData theme) => [
+        const SizedBox(height: 20),
+        Text('Where is this?', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 8),
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: true, label: Text('Where it starts'), icon: Icon(Icons.waves_rounded)),
+            ButtonSegment(value: false, label: Text('Where waves hit'), icon: Icon(Icons.beach_access_rounded)),
+          ],
+          selected: {_tsunamiOrigin},
+          onSelectionChanged: (s) => setState(() => _tsunamiOrigin = s.first),
+        ),
+        if (_tsunamiOrigin) ...[
+          const SizedBox(height: 12),
+          Text('How deep is the water there?', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 4),
+          Text(
+            'The deeper the water, the faster the wave: it sets the arrival rings.',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final depth in TsunamiDepth.values)
+                ChoiceChip(
+                  label: Text('${depth.label} · ${depth.speedKmh.round()} km/h'),
+                  selected: _tsunamiDepth == depth,
+                  onSelected: (_) => setState(() => _tsunamiDepth = depth),
+                ),
+            ],
+          ),
+        ],
       ];
 
   List<Widget> _radiationInputs(ThemeData theme) => [
@@ -554,6 +639,24 @@ List<Widget> _detailRows(Hazard hazard, ThemeData theme) {
             : 'Downwind, widening as it goes. An estimate: terrain and weather change it.'),
       ),
     if (hazard.type == HazardType.leadDust) const _LeadGuidance(),
+    if (hazard.tsunami case final tsunami?)
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.waves_rounded),
+        title: Text('The first wave travels about ${tsunami.depth.speedKmh.round()} km/h'),
+        subtitle: Text(
+          'Over ${tsunami.depth.label.toLowerCase()}. The rings show where it could be after '
+          '${TsunamiDetails.ringMinutes.join(', ')} minutes. A rough guide: waves slow and grow near shore.',
+        ),
+      ),
+    if (hazard.type == HazardType.volcanicEruption)
+      const ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.volcano_rounded),
+        title: Text('Stay out of the 10 km danger zone'),
+        subtitle: Text('Falling rock and pyroclastic flows (fast avalanches of hot gas and ash) kill near the vent. '
+            'Downwind, ash: stay indoors, wear a mask or wet cloth, and keep ash out of engines and water.'),
+      ),
     if (hazard.type == HazardType.tsunami)
       const ListTile(
         contentPadding: EdgeInsets.zero,
@@ -729,6 +832,7 @@ class _HazardDetailsSheet extends StatelessWidget {
           if (hazard.source case final source?) _SourceRow(source: source),
           ..._detailRows(hazard, theme),
           if (hazard.nuclear case final nuclear?) NuclearEffectsPanel(hazard: hazard, details: nuclear),
+          _AffectedAirports(hazard: hazard),
           const SizedBox(height: 16),
           ListTile(
             contentPadding: EdgeInsets.zero,
@@ -780,6 +884,49 @@ class _HazardDetailsSheet extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// The downloaded airports this hazard is likely to close, most urgent
+/// first: where airlifts and medical flights can no longer land.
+class _AffectedAirports extends StatelessWidget {
+  const _AffectedAirports({required this.hazard});
+  final Hazard hazard;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!affectsFlights(hazard.type)) return const SizedBox.shrink();
+    final known = context.watch<KnownAirports?>();
+    final impacts = airportImpacts([hazard], known?.value ?? const []);
+    if (impacts.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Text('Airports likely affected', style: theme.textTheme.titleSmall),
+        Text('Airlifts and medical flights may have to use another field.', style: theme.textTheme.bodySmall),
+        for (final impact in impacts.take(6))
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Badge(
+              backgroundColor: hazard.type.color,
+              label: const Icon(Icons.priority_high_rounded, size: 10, color: Colors.white),
+              child: const Icon(Icons.local_airport_rounded),
+            ),
+            title: Text(impact.airport.title),
+            subtitle: Text('${impact.band == AirportBand.wavesSoon ? 'Waves in about ${impact.minutes} min, if on the coast' : impact.band.label} · '
+                '${(distanceMeters(hazard.latitude, hazard.longitude, impact.airport.latitude, impact.airport.longitude) / 1000).round()} km away'),
+            trailing: known?.open == null ? null : const Icon(Icons.chevron_right_rounded),
+            onTap: known?.open == null
+                ? null
+                : () {
+                    Navigator.pop(context);
+                    known!.open!(impact.airport);
+                  },
+          ),
+      ],
     );
   }
 }

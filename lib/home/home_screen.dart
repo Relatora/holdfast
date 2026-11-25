@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
@@ -13,18 +14,23 @@ import '../contamination/sample.dart';
 import '../contamination/sample_layer.dart';
 import '../contamination/sample_sheet.dart';
 import '../hazards/effects/nuclear_view.dart';
+import '../hazards/aviation_impact.dart';
 import '../hazards/effects/spread_view.dart';
-import '../hazards/hazard.dart' show HazardCategory;
+import '../hazards/effects/zones_view.dart';
+import '../hazards/hazard.dart';
+import '../hazards/hazard_details.dart';
 import '../hazards/hazard_engine.dart';
 import '../hazards/hazard_filter.dart';
 import '../hazards/hazard_repository.dart';
 import '../hazards/hazard_sheets.dart';
 import '../hazards/hazards_sheet.dart';
+import '../hazards/wind_service.dart';
 import '../location/locate_flow.dart';
 import '../location/locator.dart';
 import '../reputation/achievement_badge.dart';
 import '../reputation/achievements.dart';
 import '../reputation/my_reporting_screen.dart';
+import '../map/airport_impact_layer.dart';
 import '../map/basemap_layer.dart';
 import '../map/hazard_marker.dart';
 import '../map/location_layer.dart';
@@ -36,6 +42,9 @@ import '../net/network_gate.dart';
 import '../notify/notifications.dart';
 import '../onboarding/onboarding_carousel.dart';
 import '../onboarding/onboarding_gate.dart';
+import '../placement/address_search.dart';
+import '../placement/place_flow.dart';
+import '../pois/known_airports.dart';
 import '../pois/poi.dart';
 import '../pois/poi_index.dart';
 import '../pois/poi_sheets.dart';
@@ -48,6 +57,7 @@ import '../regions/regions_screen.dart';
 import '../routing/directions.dart';
 import '../routing/directions_panel.dart';
 import '../routing/router.dart';
+import '../routing/routing_graph.dart';
 import '../settings/app_settings.dart';
 import '../settings/settings_screen.dart';
 import '../theme/app_theme_mode.dart';
@@ -118,6 +128,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _dropping = false;
   Timer? _dropTimer;
   Timer? _viewportDebounce;
+
+  // ---- Placing an incident (see lib/placement/place_flow.dart) -------------
+
+  /// What is being placed, while the pin is on screen.
+  HazardType? _placing;
+
+  /// The wind at the pin, for the plume preview; null until fetched.
+  Wind? _placeWind;
+  bool _fetchingPlaceWind = false;
+  Timer? _placeWindTimer;
+  String? _placeWindKey;
+
+  /// Street names of the active map, for address search; loaded on the
+  /// first search.
+  StreetIndex? _streets;
+  String? _streetsRegion;
   bool _radarRunning = false;
   AnimationController? _flight;
 
@@ -174,6 +200,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _locator.removeListener(_onLocatorChanged);
     _directions.dispose();
     _search.dispose();
+    _placeWindTimer?.cancel();
     _dropTimer?.cancel();
     _viewportDebounce?.cancel();
     _flight?.dispose();
@@ -234,6 +261,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() {
       _pois = raw == null ? PoiIndex.empty : PoiIndex.fromPack(jsonDecode(raw) as Map<String, Object?>);
     });
+    _publishAirports();
     if (!moveCamera) {
       _updateVisiblePois();
       return;
@@ -450,6 +478,152 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _zoomFlight = _flight;
   }
 
+  /// The airports of the active map.
+  List<Poi> get _airports => _pois.filter(categories: const {PoiCategory.airport});
+
+  /// Shares the airports with the hazard sheets (which open above this
+  /// screen and can't see it), and how to show one.
+  void _publishAirports() {
+    final known = context.read<KnownAirports?>();
+    if (known == null) return;
+    known.value = _airports;
+    known.open = _focusPoi;
+  }
+
+  /// The hazards the map shows now: live, verified or allowed unverified,
+  /// and in the chosen categories.
+  List<Hazard> _shownHazards() {
+    final settings = context.read<AppSettings>();
+    final repo = context.read<HazardRepository>();
+    return [
+      for (final hazard in repo.hazards)
+        if (isVisible(repo.assess(hazard), showUnverified: settings.showUnverifiedHazards || repo.isSandbox) &&
+            passesFilter(hazard, settings.hazardCategories))
+          hazard,
+    ];
+  }
+
+  // ---- Placing an incident ---------------------------------------------------
+
+  /// Asks what to place, then puts the pin on the map at [at] (or where the
+  /// map is). "Something else" opens the full report sheet instead.
+  Future<void> _startPlacing({LatLng? at}) async {
+    final type = await pickIncidentType(context);
+    if (type == null || !mounted) return;
+    final point = at ?? _map.camera.center;
+    if (type == HazardType.other) {
+      showReportHazardSheet(context, latitude: point.latitude, longitude: point.longitude);
+      return;
+    }
+    // A tsunami's wave rings span hundreds of kilometres: start zoomed out.
+    final zoom = type == HazardType.tsunami ? math.min(_map.camera.zoom, 7.0) : _map.camera.zoom;
+    if (at != null || zoom != _map.camera.zoom) _flyTo(point, zoom);
+    setState(() {
+      _placing = type;
+      _placeWind = null;
+      _placeWindKey = null;
+    });
+    _schedulePlaceWind();
+  }
+
+  void _cancelPlacing() => setState(() => _placing = null);
+
+  /// Done: the report sheet, with the type, the pin and the wind filled in.
+  void _placeHere() {
+    final type = _placing;
+    if (type == null) return;
+    final at = _map.camera.center;
+    final wind = _placeWind;
+    setState(() => _placing = null);
+    showReportHazardSheet(
+      context,
+      latitude: at.latitude,
+      longitude: at.longitude,
+      initialType: type,
+      initialWind: wind,
+      tsunamiAtOrigin: type == HazardType.tsunami,
+    );
+  }
+
+  /// The hazard as it would be reported at the pin, for the preview. A
+  /// nuclear detonation shows a Hiroshima-sized air burst until the report
+  /// sheet says otherwise; a tsunami, deep-ocean waves.
+  Hazard? _previewHazard() {
+    final type = _placing;
+    if (type == null) return null;
+    final at = _map.camera.center;
+    return Hazard(
+      id: 'placing',
+      type: type,
+      severity: HazardSeverity.high,
+      latitude: at.latitude,
+      longitude: at.longitude,
+      reportedBy: 'placing',
+      reportedAt: DateTime.now(),
+      details: hazardDetails(
+        wind: type.spreadsWithWind ? _placeWind : null,
+        nuclear: type == HazardType.nuclearDetonation
+            ? NuclearDetails(yieldKt: NuclearPreset.hiroshima.yieldKt, preset: NuclearPreset.hiroshima)
+            : null,
+        tsunami: type == HazardType.tsunami ? const TsunamiDetails(depth: TsunamiDepth.deepOcean) : null,
+      ),
+    );
+  }
+
+  /// Fetches the wind at the pin once the map stops moving, for types that
+  /// drift. Skipped offline; the report sheet then asks for it.
+  void _schedulePlaceWind() {
+    final type = _placing;
+    _placeWindTimer?.cancel();
+    if (type == null || !type.spreadsWithWind) return;
+    _placeWindTimer = Timer(const Duration(milliseconds: 700), () async {
+      final at = _map.camera.center;
+      // Wind changes over tens of kilometres, not metres: one fetch per
+      // tenth of a degree.
+      final key = '${(at.latitude * 10).round()},${(at.longitude * 10).round()}';
+      if (key == _placeWindKey) return;
+      final gate = context.read<NetworkGate?>();
+      if (gate != null && !gate.online) return;
+      setState(() => _fetchingPlaceWind = true);
+      final wind = await WindService(client: gate == null ? null : GatedClient(gate))
+          .current(at.latitude, at.longitude);
+      if (!mounted) return;
+      setState(() {
+        _fetchingPlaceWind = false;
+        if (wind != null) {
+          _placeWind = wind;
+          _placeWindKey = key;
+        }
+      });
+    });
+  }
+
+  /// Address search for the pin: streets and crossings from the routing
+  /// pack, named places from the POI pack. The routing pack is read once.
+  Future<List<AddressResult>> _searchOffline(String query) async {
+    final near = _map.camera.center;
+    final region = _regions.activeRegion;
+    if (region != null && _streetsRegion != region.id) {
+      _streetsRegion = region.id;
+      final bytes = await _regions.files.readPack(region.id, SidePack.routing);
+      _streets = bytes == null ? null : StreetIndex(RoutingGraph.decode(bytes));
+    }
+    final streets = _streets;
+    return [
+      if (streets != null) ...streets.crossings(query, near: near),
+      if (streets != null) ...streets.streets(query, near: near),
+      ...placeResults(_pois.pois, query, near: near),
+    ];
+  }
+
+  /// Full addresses from Photon, or null (no online search) in offline mode.
+  Future<List<AddressResult>> Function(String)? get _searchOnline {
+    final gate = context.read<NetworkGate?>();
+    if (gate != null && !gate.online) return null;
+    return (query) =>
+        PhotonClient(client: gate == null ? http.Client() : GatedClient(gate)).search(query, near: _map.camera.center);
+  }
+
   void _reportAtCentre() {
     final c = _map.camera.center;
     showReportHazardSheet(context, latitude: c.latitude, longitude: c.longitude);
@@ -525,11 +699,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() => _highlightedPoi = poi.id);
     _flyTo(LatLng(poi.latitude, poi.longitude), math.max(_map.camera.zoom, 15));
     final center = _map.camera.center;
+    final airports = poi.category == PoiCategory.airport ? _airports : const <Poi>[];
+    final allImpacts = airportImpacts(_shownHazards(), airports);
+    final impacts = [
+      for (final impact in allImpacts)
+        if (impact.airport.id == poi.id) impact,
+    ];
+    final alternative = impacts.isEmpty ? null : nearestClearAirport(poi, airports, allImpacts);
     showPlaceSheet(
       context,
       poi,
       meters: distanceMeters(center.latitude, center.longitude, poi.latitude, poi.longitude),
       onDirections: () => _openDirections(LatLng(poi.latitude, poi.longitude), poi.title, viewCenter: viewBefore),
+      impacts: impacts,
+      alternative: alternative,
+      onAlternative: alternative == null ? null : () => _focusPoi(alternative),
     ).whenComplete(() {
       if (mounted) setState(() => _highlightedPoi = null);
     });
@@ -677,6 +861,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               onTap: () => Navigator.pop(context, 'hazard'),
             ),
             ListTile(
+              leading: const Icon(Icons.volcano_rounded),
+              title: const Text('Place an incident here'),
+              subtitle: const Text('A detonation, leak, eruption or tsunami, with its spread'),
+              onTap: () => Navigator.pop(context, 'place'),
+            ),
+            ListTile(
               leading: const Icon(Icons.science_rounded),
               title: const Text('Add a soil or radiation reading here'),
               onTap: () => Navigator.pop(context, 'sample'),
@@ -691,6 +881,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _openDirections(point, 'the marked spot');
       case 'hazard':
         showReportHazardSheet(context, latitude: point.latitude, longitude: point.longitude);
+      case 'place':
+        _startPlacing(at: point);
       case 'sample':
         showAddSampleSheet(context, latitude: point.latitude, longitude: point.longitude);
     }
@@ -726,236 +918,303 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ? hazardsRepo.liveSamples
         : const <Sample>[];
     final zones = _zonesFor(samples);
+    final preview = _previewHazard();
 
     // Keyboard shortcuts (desktop). The Focus takes focus when nothing else
     // has it, so they work as soon as the map shows; clicking a field moves
     // focus there as usual.
-    return CallbackShortcuts(
-      bindings: _shortcuts,
-      child: Focus(
-        autofocus: true,
-        child: Scaffold(
-          body: Stack(
-            children: [
-              FlutterMap(
-                mapController: _map,
-                options: MapOptions(
-                  initialCenter: const LatLng(45.42, -75.69),
-                  initialZoom: 3,
-                  minZoom: 2,
-                  maxZoom: BasemapLayer.maxMapZoom,
-                  backgroundColor: scheme.surface,
-                  interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
-                  onPositionChanged: (_, hasGesture) {
-                    _viewportDebounce?.cancel();
-                    _viewportDebounce = Timer(const Duration(milliseconds: 120), _updateVisiblePois);
-                  },
-                  onLongPress: (_, point) => _openPointMenu(point),
-                  onSecondaryTap: (_, point) => _openPointMenu(point),
-                ),
-                children: [
-                  if (_localSources.isEmpty && planet == null)
-                    TopoBackground(animate: animate)
-                  else
-                    BasemapLayer(local: _localSources, remote: planet, revision: _sourcesKey, mode: mode),
-                  // Streaming blurs where the device's maps end, so draw it.
-                  if (streaming) ...savedAreaLayers(_downloaded, scheme, zoom: _zoom),
-                  ...sampleZoneLayers(zones, onTapLabel: (_) => _openHazards()),
-                  spreadLayer([for (final h in hazards) h.hazard]),
-                  nuclearRingsLayer([for (final h in hazards) h.hazard], settings.nuclearView),
-                  if (_directions.plan case final plan?) ...routeLayers(plan, scheme),
-                  MarkerLayer(
-                    markers: [
-                      for (final (i, poi) in _visiblePois.indexed)
-                        Marker(
-                          key: ValueKey(poi.id),
-                          point: LatLng(poi.latitude, poi.longitude),
-                          width: PoiMarker.width,
-                          height: PoiMarker.height,
-                          alignment: Alignment.topCenter,
-                          child: GestureDetector(
-                            onTap: () => _focusPoi(poi),
-                            child: PoiMarker(
-                              poi: poi,
-                              animate: animate && _dropping,
-                              highlighted: poi.id == _highlightedPoi,
-                              dropDelay: Duration(milliseconds: math.min(i, 30) * 18),
-                              nightVision: nightVision,
-                              streamed: _streamedPois.contains(poi.id),
-                            ),
-                          ),
-                        ),
-                    ],
+    return PopScope(
+      // Back (or Esc) while placing cancels the placing, rather than
+      // leaving the app with the pin still out.
+      canPop: _placing == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _placing != null) _cancelPlacing();
+      },
+      child: CallbackShortcuts(
+        bindings: {
+          ..._shortcuts,
+          if (_placing != null) const SingleActivator(LogicalKeyboardKey.escape): _cancelPlacing,
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            body: Stack(
+              children: [
+                FlutterMap(
+                  mapController: _map,
+                  options: MapOptions(
+                    initialCenter: const LatLng(45.42, -75.69),
+                    initialZoom: 3,
+                    minZoom: 2,
+                    maxZoom: BasemapLayer.maxMapZoom,
+                    backgroundColor: scheme.surface,
+                    interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate),
+                    onPositionChanged: (_, hasGesture) {
+                      // The preview follows the pin as the map moves.
+                      if (_placing != null) {
+                        setState(() {});
+                        _schedulePlaceWind();
+                      }
+                      _viewportDebounce?.cancel();
+                      _viewportDebounce = Timer(const Duration(milliseconds: 120), _updateVisiblePois);
+                    },
+                    onLongPress: (_, point) => _openPointMenu(point),
+                    onSecondaryTap: (_, point) => _openPointMenu(point),
                   ),
-                  sampleDotLayer(
-                    samples,
-                    disputed: (s) => hazardsRepo.assessSampleNow(s) == SampleStatus.disputed,
-                    onTap: (s) => showSampleDetailsSheet(context, s.id),
-                  ),
-                  MarkerLayer(
-                    markers: [
-                      for (final (:hazard, :assessment) in hazards)
-                        Marker(
-                          key: ValueKey(hazard.id),
-                          point: LatLng(hazard.latitude, hazard.longitude),
-                          width: HazardMarker.size,
-                          height: HazardMarker.size,
-                          child: Center(
+                  children: [
+                    if (_localSources.isEmpty && planet == null)
+                      TopoBackground(animate: animate)
+                    else
+                      BasemapLayer(local: _localSources, remote: planet, revision: _sourcesKey, mode: mode),
+                    // Streaming blurs where the device's maps end, so draw it.
+                    if (streaming) ...savedAreaLayers(_downloaded, scheme, zoom: _zoom),
+                    ...sampleZoneLayers(zones, onTapLabel: (_) => _openHazards()),
+                    spreadLayer([for (final h in hazards) h.hazard, ?preview]),
+                    nuclearRingsLayer([for (final h in hazards) h.hazard, ?preview], settings.nuclearView),
+                    ...zoneLayers([for (final h in hazards) h.hazard, ?preview]),
+                    if (_directions.plan case final plan?) ...routeLayers(plan, scheme),
+                    MarkerLayer(
+                      markers: [
+                        for (final (i, poi) in _visiblePois.indexed)
+                          Marker(
+                            key: ValueKey(poi.id),
+                            point: LatLng(poi.latitude, poi.longitude),
+                            width: PoiMarker.width,
+                            height: PoiMarker.height,
+                            alignment: Alignment.topCenter,
                             child: GestureDetector(
-                              onTap: () => showHazardDetailsSheet(context, hazard.id),
-                              child: HazardMarker(
-                                hazard: hazard,
-                                assessment: assessment,
-                                animate: animate,
+                              onTap: () => _focusPoi(poi),
+                              child: PoiMarker(
+                                poi: poi,
+                                animate: animate && _dropping,
+                                highlighted: poi.id == _highlightedPoi,
+                                dropDelay: Duration(milliseconds: math.min(i, 30) * 18),
                                 nightVision: nightVision,
+                                streamed: _streamedPois.contains(poi.id),
                               ),
                             ),
                           ),
+                      ],
+                    ),
+                    sampleDotLayer(
+                      samples,
+                      disputed: (s) => hazardsRepo.assessSampleNow(s) == SampleStatus.disputed,
+                      onTap: (s) => showSampleDetailsSheet(context, s.id),
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        for (final (:hazard, :assessment) in hazards)
+                          Marker(
+                            key: ValueKey(hazard.id),
+                            point: LatLng(hazard.latitude, hazard.longitude),
+                            width: HazardMarker.size,
+                            height: HazardMarker.size,
+                            child: Center(
+                              child: GestureDetector(
+                                onTap: () => showHazardDetailsSheet(context, hazard.id),
+                                child: HazardMarker(
+                                  hazard: hazard,
+                                  assessment: assessment,
+                                  animate: animate,
+                                  nightVision: nightVision,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    // Airports a hazard is likely to close, flagged whether or
+                    // not airports are shown.
+                    affectedAirportLayer(
+                      airportImpacts([for (final h in hazards) h.hazard, ?preview], _airports),
+                      animate: animate,
+                      onTap: _focusPoi,
+                    ),
+                    // Last, so your own position is never hidden under a pin.
+                    ...locationLayers(_locator.last, scheme),
+                  ],
+                ),
+
+                if (_radarRunning)
+                  Positioned.fill(
+                    child: RadarSweep(color: scheme.primary, onDone: _showNearest),
+                  ),
+
+                // Placing: the pin in the middle, the banner on top...
+                if (_placing case final type?) PlacementPin(type: type),
+                if (_placing case final type?)
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 560),
+                          child: PlacementBanner(
+                            key: ValueKey(type),
+                            type: type,
+                            searchOffline: _searchOffline,
+                            searchOnline: _searchOnline,
+                            onResult: (r) => _flyTo(r.point, math.max(_map.camera.zoom, 14)),
+                            onCancel: _cancelPlacing,
+                          ),
                         ),
+                      ),
+                    ),
+                  )
+                // ...otherwise search and category filters.
+                else
+                  SafeArea(
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                          child: PlaceSearchBar(
+                            index: _pois,
+                            controller: _search,
+                            onSelected: _focusPoi,
+                            onOpenSettings: _openSettings,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        CategoryChips(
+                          selected: _categories,
+                          onToggle: _toggleCategory,
+                          animate: animate,
+                          nightVision: nightVision,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // Right: map tools.
+                Positioned(
+                  right: 12,
+                  top: MediaQuery.paddingOf(context).top + 130,
+                  child: Column(
+                    children: [
+                      const ThemeToggleButton(),
+                      const SizedBox(height: 10),
+                      FloatingActionButton.small(
+                        heroTag: 'maps',
+                        tooltip: 'Maps',
+                        onPressed: _openRegions,
+                        child: const Icon(Icons.layers_rounded),
+                      ),
+                      const SizedBox(height: 10),
+                      FloatingActionButton.small(
+                        heroTag: 'hazards',
+                        tooltip: shownCategories.isEmpty ? 'Hazards' : 'Hazards (filtered)',
+                        onPressed: _openHazards,
+                        child: Badge(
+                          // A dot when the map is filtered, so hidden hazards are
+                          // never a surprise; otherwise the count on the map.
+                          isLabelVisible: hazards.isNotEmpty || shownCategories.isNotEmpty,
+                          label: shownCategories.isEmpty ? Text('${hazards.length}') : null,
+                          smallSize: 9,
+                          child: const Icon(Icons.warning_amber_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ZoomButtons(onZoomIn: () => _zoomBy(1), onZoomOut: () => _zoomBy(-1)),
+                      const SizedBox(height: 10),
+                      MyLocationButton(busy: _locator.busy, located: _locator.last != null, onPressed: _goToMyLocation),
                     ],
                   ),
-                  // Last, so your own position is never hidden under a pin.
-                  ...locationLayers(_locator.last, scheme),
-                ],
-              ),
-
-              if (_radarRunning)
-                Positioned.fill(
-                  child: RadarSweep(color: scheme.primary, onDone: _showNearest),
                 ),
 
-              // Top: search and category filters.
-              SafeArea(
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                      child: PlaceSearchBar(
-                        index: _pois,
-                        controller: _search,
-                        onSelected: _focusPoi,
-                        onOpenSettings: _openSettings,
+                // Bottom: while placing, the wind and "Place here"...
+                if (_placing case final type?)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: MediaQuery.paddingOf(context).bottom + 12,
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 560),
+                        child: PlacementFooter(
+                          type: type,
+                          wind: _placeWind,
+                          fetchingWind: _fetchingPlaceWind,
+                          onPlace: _placeHere,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    CategoryChips(
-                      selected: _categories,
-                      onToggle: _toggleCategory,
-                      animate: animate,
-                      nightVision: nightVision,
-                    ),
-                  ],
-                ),
-              ),
-
-              // Right: map tools.
-              Positioned(
-                right: 12,
-                top: MediaQuery.paddingOf(context).top + 130,
-                child: Column(
-                  children: [
-                    const ThemeToggleButton(),
-                    const SizedBox(height: 10),
-                    FloatingActionButton.small(
-                      heroTag: 'maps',
-                      tooltip: 'Maps',
-                      onPressed: _openRegions,
-                      child: const Icon(Icons.layers_rounded),
-                    ),
-                    const SizedBox(height: 10),
-                    FloatingActionButton.small(
-                      heroTag: 'hazards',
-                      tooltip: shownCategories.isEmpty ? 'Hazards' : 'Hazards (filtered)',
-                      onPressed: _openHazards,
-                      child: Badge(
-                        // A dot when the map is filtered, so hidden hazards are
-                        // never a surprise; otherwise the count on the map.
-                        isLabelVisible: hazards.isNotEmpty || shownCategories.isNotEmpty,
-                        label: shownCategories.isEmpty ? Text('${hazards.length}') : null,
-                        smallSize: 9,
-                        child: const Icon(Icons.warning_amber_rounded),
+                  )
+                // ...the directions panel while it's open...
+                else if (_directions.isOpen)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: MediaQuery.paddingOf(context).bottom + 12,
+                    child: Center(
+                      child: DirectionsPanel(
+                        directions: _directions,
+                        onStepTap: (step) => _flyTo(step.at, math.max(_map.camera.zoom, 16)),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    ZoomButtons(onZoomIn: () => _zoomBy(1), onZoomOut: () => _zoomBy(-1)),
-                    const SizedBox(height: 10),
-                    MyLocationButton(busy: _locator.busy, located: _locator.last != null, onPressed: _goToMyLocation),
-                  ],
-                ),
-              ),
-
-              // Bottom: the directions panel while it's open...
-              if (_directions.isOpen)
-                Positioned(
-                  left: 12,
-                  right: 12,
-                  bottom: MediaQuery.paddingOf(context).bottom + 12,
-                  child: Center(
-                    child: DirectionsPanel(
-                      directions: _directions,
-                      onStepTap: (step) => _flyTo(step.at, math.max(_map.camera.zoom, 16)),
-                    ),
-                  ),
-                )
-              // ...otherwise status, attribution and the main actions.
-              else
-                Positioned(
-                  left: 12,
-                  right: 12,
-                  bottom: MediaQuery.paddingOf(context).bottom + 12,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                  )
+                // ...otherwise status, attribution and the main actions.
+                else
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: MediaQuery.paddingOf(context).bottom + 12,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SyncStatusChip(status: hazardsRepo.syncStatus),
+                              const SizedBox(height: 6),
+                              RegionStatusChip(
+                                region: active,
+                                offline: regions.files.storesOffline,
+                                updates: regions.updatable,
+                                streaming: streaming,
+                                centerRegion: _centerRegion,
+                                onTap: _openMyMaps,
+                              ),
+                              const SizedBox(height: 6),
+                              const AttributionChip(),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Column(
                           mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            SyncStatusChip(status: hazardsRepo.syncStatus),
-                            const SizedBox(height: 6),
-                            RegionStatusChip(
-                              region: active,
-                              offline: regions.files.storesOffline,
-                              updates: regions.updatable,
-                              streaming: streaming,
-                              centerRegion: _centerRegion,
-                              onTap: _openMyMaps,
+                            FloatingActionButton.small(
+                              heroTag: 'report',
+                              tooltip:
+                                  'Place an incident or report a hazard (or $secondaryPress the map${isDesktop ? '; R' : ''})',
+                              backgroundColor: scheme.errorContainer,
+                              foregroundColor: scheme.onErrorContainer,
+                              onPressed: _startPlacing,
+                              child: const Icon(Icons.add_alert_rounded),
                             ),
-                            const SizedBox(height: 6),
-                            const AttributionChip(),
+                            const SizedBox(height: 10),
+                            FloatingActionButton.extended(
+                              heroTag: 'nearest',
+                              onPressed: _pois.isEmpty ? _openRegions : _runRadar,
+                              icon: Icon(_pois.isEmpty ? Icons.download_rounded : Icons.radar_rounded),
+                              label: Text(_pois.isEmpty ? 'Get a map' : 'Nearest supplies'),
+                            ),
                           ],
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          FloatingActionButton.small(
-                            heroTag: 'report',
-                            tooltip: 'Report a hazard here (or $secondaryPress the map${isDesktop ? '; R' : ''})',
-                            backgroundColor: scheme.errorContainer,
-                            foregroundColor: scheme.onErrorContainer,
-                            onPressed: _reportAtCentre,
-                            child: const Icon(Icons.add_alert_rounded),
-                          ),
-                          const SizedBox(height: 10),
-                          FloatingActionButton.extended(
-                            heroTag: 'nearest',
-                            onPressed: _pois.isEmpty ? _openRegions : _runRadar,
-                            icon: Icon(_pois.isEmpty ? Icons.download_rounded : Icons.radar_rounded),
-                            label: Text(_pois.isEmpty ? 'Get a map' : 'Nearest supplies'),
-                          ),
-                        ],
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
 
-              // While streaming, the world is on screen already; the Get a map
-              // button below still offers a download.
-              if (regions.loaded && active == null && !streaming) Center(child: NoMapCard(onChoose: _openRegions)),
-            ],
+                // While streaming, the world is on screen already; the Get a map
+                // button below still offers a download.
+                if (regions.loaded && active == null && !streaming) Center(child: NoMapCard(onChoose: _openRegions)),
+              ],
+            ),
           ),
         ),
       ),

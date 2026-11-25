@@ -46,7 +46,9 @@ class Plume {
     HazardType.chemicalSpill => (sourceMeters: 100.0, maxMeters: 10000.0),
     HazardType.fire => (sourceMeters: 300.0, maxMeters: 30000.0),
     HazardType.radiation => (sourceMeters: 200.0, maxMeters: 50000.0),
-    HazardType.volcanicAsh => (sourceMeters: 1000.0, maxMeters: 200000.0),
+    // An eruption column throws ash hundreds of kilometres: the bands stop
+    // at 200 km, as for ash reported on its own.
+    HazardType.volcanicAsh || HazardType.volcanicEruption => (sourceMeters: 1000.0, maxMeters: 200000.0),
     // Lead dust settles out over tens of kilometres: for the 2026 Iowa
     // detonation the Army mapped meaningful deposits about 40 miles
     // (64 km) downwind. The bands show where it may have settled.
