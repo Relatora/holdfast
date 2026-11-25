@@ -30,6 +30,7 @@ class AppSettings extends ChangeNotifier {
   static const _kLaunchedBefore = 'launchedBefore';
   static const _kThemeMode = 'themeMode';
   static const _kBatterySaver = 'batterySaver';
+  static const _kShowIntro = 'showIntro';
   static const _kOnboardingDismissed = 'onboardingDismissed';
   static const _kShowUnverified = 'showUnverifiedHazards';
   static const _kHazardCategories = 'hazardCategories';
@@ -67,6 +68,14 @@ class AppSettings extends ChangeNotifier {
   bool get batterySaver => _prefs.getBool(_kBatterySaver) ?? false;
   set batterySaver(bool value) {
     _prefs.setBool(_kBatterySaver, value);
+    notifyListeners();
+  }
+
+  /// The animated intro on start. On by default; when off, the system's
+  /// static splash still covers loading.
+  bool get showIntro => _prefs.getBool(_kShowIntro) ?? true;
+  set showIntro(bool value) {
+    _prefs.setBool(_kShowIntro, value);
     notifyListeners();
   }
 

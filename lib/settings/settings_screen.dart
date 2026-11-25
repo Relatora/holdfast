@@ -89,6 +89,13 @@ class SettingsScreen extends StatelessWidget {
             value: settings.batterySaver,
             onChanged: (value) => settings.batterySaver = value,
           ),
+          SwitchListTile(
+            secondary: const Icon(Icons.wb_twilight_rounded),
+            title: const Text('Show the intro on start'),
+            subtitle: const Text('The short animation with the solar-storm message. Takes effect next launch.'),
+            value: settings.showIntro,
+            onChanged: (value) => settings.showIntro = value,
+          ),
           const _Header('Hazards'),
           ListTile(
             leading: const Icon(Icons.school_rounded),

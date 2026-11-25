@@ -103,7 +103,7 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: locator),
         Provider<Notifications>.value(value: notifications),
       ],
-      child: HoldfastApp(navigatorKey: navigator),
+      child: HoldfastApp(navigatorKey: navigator, showIntro: settings.showIntro),
     ),
   );
 }
