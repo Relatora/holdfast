@@ -1,0 +1,19 @@
+# The native splash: what the system shows before Flutter draws its first
+# frame. Plain slate, the first frame of the animated intro
+# (lib/brand/intro_overlay.dart), which then draws the mark from nothing, so
+# the hand-over is seamless. Regenerate with the generator as a global tool (as a project
+# dependency, its Android module breaks debug builds):
+#   dart pub global activate flutter_native_splash
+#   dart pub global run flutter_native_splash:create
+flutter_native_splash:
+  color: "#0F1417"
+  # Android 12+ always draws an icon (the app's, unless told otherwise), so
+  # it gets a transparent one.
+  android_12:
+    color: "#0F1417"
+    image: assets/brand/splash_blank.png
+    icon_background_color: "#0F1417"
+  android: true
+  ios: true
+  web: true
+  fullscreen: false
