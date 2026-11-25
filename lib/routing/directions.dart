@@ -6,13 +6,13 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../hazards/effects/nuclear_effects.dart';
 import '../hazards/effects/spread.dart';
 import '../hazards/hazard.dart';
 import '../hazards/hazard_details.dart';
+import '../location/locator.dart';
 import 'router.dart';
 import 'routing_graph.dart';
 
@@ -56,25 +56,16 @@ double _radiusFor(Hazard hazard) {
   return math.max(reach, avoidRadiusMeters(hazard.type));
 }
 
-/// The device's position, or null when it has none or may not share it.
+/// The device's GPS position, or null when it has none or may not share it.
 ///
 /// GPS works with no network at all, which is the point; but a desktop
 /// without a location service, or a refused permission, is normal and
-/// simply means routes start from the middle of the map instead.
-Future<LatLng?> currentLocation() async {
-  try {
-    if (!await Geolocator.isLocationServiceEnabled()) return null;
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return null;
-    final position = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 8)),
-    );
-    return LatLng(position.latitude, position.longitude);
-  } catch (_) {
-    return null;
-  }
-}
+/// simply means routes start from the middle of the map instead. The home
+/// screen passes its own [DeviceLocator] so routes start from the dot on the map.
+Future<LatLng?> currentLocation() async => switch (await DeviceLocator().gps()) {
+      Located(:final fix) => fix.at,
+      LocateFailed() => null,
+    };
 
 RoutingGraph _decode(Uint8List bytes) => RoutingGraph.decode(bytes);
 

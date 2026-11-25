@@ -286,6 +286,35 @@ class ZoomButtons extends StatelessWidget {
   }
 }
 
+/// "Go to my location". Shows a spinner while looking, and a filled icon
+/// once the device has been found.
+class MyLocationButton extends StatelessWidget {
+  const MyLocationButton({super.key, required this.busy, required this.located, required this.onPressed});
+
+  final bool busy;
+  final bool located;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return FloatingActionButton.small(
+      heroTag: 'myLocation',
+      tooltip: busy ? 'Finding your location' : 'Go to my location',
+      onPressed: busy ? null : onPressed,
+      child: busy
+          // In the button's own foreground colour (the icon theme the FAB
+          // sets): the default, primary, vanishes on a primary button.
+          ? Builder(
+              builder: (context) => SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2.5, color: IconTheme.of(context).color),
+              ),
+            )
+          : Icon(located ? Icons.my_location_rounded : Icons.location_searching_rounded),
+    );
+  }
+}
+
 /// A rounded, translucent capsule used for the status lines.
 class _Capsule extends StatelessWidget {
   const _Capsule({super.key, required this.icon, required this.text, this.color, this.onTap});
