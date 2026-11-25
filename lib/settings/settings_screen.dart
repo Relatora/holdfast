@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
@@ -36,6 +37,24 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+          // The web preview streams every map from the server, so it has
+          // nothing to offer offline.
+          if (!kIsWeb) ...[
+            const _Header('Connection'),
+            SwitchListTile(
+              secondary: Icon(settings.offlineMode ? Icons.airplanemode_active_rounded : Icons.wifi_rounded),
+              title: const Text('Offline mode'),
+              subtitle: Text(
+                settings.offlineMode
+                    ? 'Holdfast uses no network. Your maps work as usual; reports wait on this '
+                        'device and send when you turn this off.'
+                    : 'Keep Holdfast off the network entirely, to save battery or data. '
+                        'Maps on this device keep working.',
+              ),
+              value: settings.offlineMode,
+              onChanged: (value) => settings.offlineMode = value,
+            ),
+          ],
           const _Header('Power & motion'),
           SwitchListTile(
             secondary: const Icon(Icons.battery_saver_rounded),

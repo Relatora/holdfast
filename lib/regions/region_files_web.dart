@@ -1,10 +1,15 @@
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
+
 import 'region_files.dart';
 
 /// Web build: nothing is stored; the map streams tiles from the server with
 /// HTTP range requests, and the POI pack is fetched on demand.
 class PlatformRegionFiles implements RegionFiles {
+  // Takes the same arguments as the real one; nothing here downloads.
+  PlatformRegionFiles({http.Client Function()? newClient});
+
   @override
   bool get storesOffline => false;
 

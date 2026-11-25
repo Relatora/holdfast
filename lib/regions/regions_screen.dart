@@ -101,21 +101,35 @@ class _RegionsScreenState extends State<RegionsScreen> {
 class _StatusBanner extends StatelessWidget {
   const _StatusBanner();
 
+  /// The most important thing to know about getting maps right now.
+  static (IconData, String) _message(RegionStore store) {
+    if (store.offlineMode) {
+      return (
+        Icons.airplanemode_active_rounded,
+        'Offline mode is on. Maps on this device work as usual; turn it off in Settings to download or update maps.',
+      );
+    }
+    if (!store.serverReachable) {
+      return (Icons.cloud_off_rounded, "Can't reach the map server. Maps already on this device still work.");
+    }
+    if (!store.files.storesOffline) {
+      return (Icons.public_rounded, 'Web preview: maps stream from the server. Install the app to keep them offline.');
+    }
+    if (store.prepareMaxBytes case final max?) {
+      return (
+        Icons.cloud_sync_rounded,
+        "Maps the server hasn't built yet are prepared when you ask for them (up to ${formatBytes(max)}), "
+            'then downloaded.',
+      );
+    }
+    return (Icons.offline_pin_rounded, '${store.readyRegions.length} map(s) stored on this device for offline use.');
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = context.watch<RegionStore>();
     final scheme = Theme.of(context).colorScheme;
-    final (icon, text) = !store.serverReachable
-        ? (Icons.cloud_off_rounded, "Can't reach the map server. Maps already on this device still work.")
-        : !store.files.storesOffline
-            ? (Icons.public_rounded, 'Web preview: maps stream from the server. Install the app to keep them offline.')
-            : store.prepareMaxBytes != null
-                ? (
-                    Icons.cloud_sync_rounded,
-                    'Maps the server hasn\'t built yet are prepared when you ask for them '
-                        '(up to ${formatBytes(store.prepareMaxBytes!)}), then downloaded.',
-                  )
-                : (Icons.offline_pin_rounded, '${store.readyRegions.length} map(s) stored on this device for offline use.');
+    final (icon, text) = _message(store);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -363,6 +377,7 @@ class _RegionTile extends StatelessWidget {
         },
       RegionPhase.failed => '${state.error ?? 'Download failed'}. Tap to retry.',
       RegionPhase.unavailable => switch (store.unavailableReason(region)) {
+          UnavailableReason.offlineMode => '$size · offline mode is on',
           UnavailableReason.tooBig => '$size · too big for this server to prepare',
           UnavailableReason.serverUnreachable => '$size · server unreachable',
           _ => '$size · not on this server',

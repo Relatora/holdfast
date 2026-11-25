@@ -6,13 +6,24 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../net/network_gate.dart';
 import '../sync/sync_client.dart';
 import 'hazard.dart';
 import 'hazard_engine.dart';
 import 'hazard_events.dart';
 import 'reputation.dart';
 
-enum SyncStatus { idle, syncing, synced, offline }
+enum SyncStatus {
+  idle,
+  syncing,
+  synced,
+
+  /// The server couldn't be reached; reports wait in the outbox.
+  offline,
+
+  /// Offline mode is on: the app isn't trying to sync at all.
+  paused,
+}
 
 /// Owns this device's hazard event log and keeps it in sync.
 ///
@@ -23,14 +34,36 @@ enum SyncStatus { idle, syncing, synced, offline }
 /// * The visible hazards are always `foldHazardEvents(log)`, recomputed on
 ///   change and once a minute so expiry and fade-out happen on time.
 class HazardRepository extends ChangeNotifier {
-  HazardRepository({required this.deviceId, this.sync, DateTime Function()? clock, this.persist = true})
-      : _clock = clock ?? DateTime.now;
+  HazardRepository({
+    required this.deviceId,
+    this.sync,
+    this.network,
+    DateTime Function()? clock,
+    this.persist = true,
+  }) : _clock = clock ?? DateTime.now {
+    network?.addListener(_onNetworkChanged);
+  }
+
+  /// Offline mode: while it is on, nothing is sent or fetched. Reports and
+  /// votes still save on this device and wait in the outbox.
+  final NetworkGate? network;
+
+  /// Offline mode switched: pause, or sync at once to catch up.
+  void _onNetworkChanged() {
+    if (network!.online) {
+      unawaited(syncNow());
+    } else if (syncStatus != SyncStatus.syncing) {
+      syncStatus = SyncStatus.paused;
+      notifyListeners();
+    }
+  }
 
   /// A throwaway repository for training: nothing is read from or written to
   /// storage and nothing is synced, so practice reports can never reach the
   /// real map or anyone else.
   HazardRepository.sandbox({required this.deviceId, DateTime Function()? clock})
       : sync = null,
+        network = null,
         persist = false,
         _clock = clock ?? DateTime.now;
 
@@ -142,6 +175,7 @@ class HazardRepository extends ChangeNotifier {
 
   @override
   void dispose() {
+    network?.removeListener(_onNetworkChanged);
     _syncTimer?.cancel();
     _clockTimer?.cancel();
     thanks.dispose();
@@ -242,6 +276,13 @@ class HazardRepository extends ChangeNotifier {
   Future<void> syncNow() async {
     final sync = this.sync;
     if (sync == null || syncStatus == SyncStatus.syncing) return;
+    if (network?.online == false) {
+      if (syncStatus != SyncStatus.paused) {
+        syncStatus = SyncStatus.paused;
+        notifyListeners();
+      }
+      return;
+    }
     syncStatus = SyncStatus.syncing;
     notifyListeners();
     try {
@@ -256,6 +297,9 @@ class HazardRepository extends ChangeNotifier {
       await _save();
       syncStatus = SyncStatus.synced;
       lastSynced = now;
+    } on OfflineModeException {
+      // Offline mode came on mid-sync; the gated client refused.
+      syncStatus = SyncStatus.paused;
     } catch (_) {
       syncStatus = SyncStatus.offline;
     }

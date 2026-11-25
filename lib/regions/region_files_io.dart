@@ -16,6 +16,9 @@ import 'region_files.dart';
 /// continues from the bytes already on disk, which matters for multi-gigabyte
 /// country and continent files on flaky connections.
 class PlatformRegionFiles implements RegionFiles {
+  PlatformRegionFiles({http.Client Function()? newClient}) : _newClient = newClient ?? http.Client.new;
+
+  final http.Client Function() _newClient;
   Directory? _dir;
 
   Future<Directory> _regionsDir() async {
@@ -51,18 +54,27 @@ class PlatformRegionFiles implements RegionFiles {
 
     // The side packs are small, so fetch them first; then the basemap
     // reports progress for the part that actually takes time.
-    for (final (url, name) in [
-      (pois, '$regionId.pois.json'),
-      for (final MapEntry(key: pack, value: url) in packs.entries) (url, pack.fileName(regionId)),
-    ]) {
-      if (url == null) continue;
-      if (cancel.isCancelled) throw const DownloadCancelledException();
-      final response = await http.get(url);
-      if (response.statusCode == 200) {
-        final part = File('${(await _file(name)).path}.part');
-        await part.writeAsBytes(response.bodyBytes, flush: true);
-        staged.add(part);
+    final client = _newClient();
+    cancel.onCancel(client.close);
+    try {
+      for (final (url, name) in [
+        (pois, '$regionId.pois.json'),
+        for (final MapEntry(key: pack, value: url) in packs.entries) (url, pack.fileName(regionId)),
+      ]) {
+        if (url == null) continue;
+        if (cancel.isCancelled) throw const DownloadCancelledException();
+        final response = await client.get(url);
+        if (response.statusCode == 200) {
+          final part = File('${(await _file(name)).path}.part');
+          await part.writeAsBytes(response.bodyBytes, flush: true);
+          staged.add(part);
+        }
       }
+    } on http.ClientException {
+      if (cancel.isCancelled) throw const DownloadCancelledException();
+      rethrow;
+    } finally {
+      client.close();
     }
 
     final basemapPart = File('${(await _file('$regionId.pmtiles')).path}.part');
@@ -84,7 +96,7 @@ class PlatformRegionFiles implements RegionFiles {
   ) async {
     var received = await part.exists() ? await part.length() : 0;
 
-    final client = http.Client();
+    final client = _newClient();
     cancel.onCancel(client.close);
     try {
       final request = http.Request('GET', url);
