@@ -8,8 +8,13 @@ import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
+import '../contamination/interpolation.dart';
+import '../contamination/sample.dart';
+import '../contamination/sample_layer.dart';
+import '../contamination/sample_sheet.dart';
 import '../hazards/effects/nuclear_view.dart';
 import '../hazards/effects/spread_view.dart';
+import '../hazards/hazard.dart' show HazardCategory;
 import '../hazards/hazard_engine.dart';
 import '../hazards/hazard_filter.dart';
 import '../hazards/hazard_repository.dart';
@@ -551,11 +556,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   /// Hazards currently shown on the map, as areas a route should avoid.
   List<Avoid> _avoidNow() {
     final showUnverified = context.read<AppSettings>().showUnverifiedHazards || _hazardRepo.isSandbox;
-    return avoidAreas([
-      for (final h in _hazardRepo.hazards)
-        if (isVisible(_hazardRepo.assess(h), showUnverified: showUnverified)) h,
-    ]);
+    final samples = _hazardRepo.liveSamples;
+    return [
+      ...avoidAreas([
+        for (final h in _hazardRepo.hazards)
+          if (isVisible(_hazardRepo.assess(h), showUnverified: showUnverified)) h,
+      ]),
+      // Very high and dangerous ground from soil readings, too.
+      ...sampleAvoidAreas(samples, _zonesFor(samples)),
+    ];
   }
+
+  /// Estimated zones, recomputed only when the readings change: the grid
+  /// is cheap, but not cheap enough for every frame of a pan.
+  List<EstimatedZone> _zonesFor(List<Sample> samples) {
+    final key = [for (final s in samples) '${s.id}:${s.value}'].join('|');
+    if (key != _zonesKey) {
+      _zonesKey = key;
+      _zones = estimateZones(samples);
+    }
+    return _zones;
+  }
+
+  String? _zonesKey;
+  List<EstimatedZone> _zones = const [];
 
   void _openDirections(LatLng to, String label, {LatLng? viewCenter}) {
     final region = _regions.activeRegion;
@@ -612,6 +636,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               title: const Text('Report a hazard here'),
               onTap: () => Navigator.pop(context, 'hazard'),
             ),
+            ListTile(
+              leading: const Icon(Icons.science_rounded),
+              title: const Text('Add a soil or radiation reading here'),
+              onTap: () => Navigator.pop(context, 'sample'),
+            ),
           ],
         ),
       ),
@@ -622,6 +651,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _openDirections(point, 'the marked spot');
       case 'hazard':
         showReportHazardSheet(context, latitude: point.latitude, longitude: point.longitude);
+      case 'sample':
+        showAddSampleSheet(context, latitude: point.latitude, longitude: point.longitude);
     }
   }
 
@@ -647,6 +678,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             passesFilter(hazard, shownCategories))
           (hazard: hazard, assessment: hazardsRepo.assess(hazard)),
     ];
+    // Readings belong to the chemical & radiological category's filter.
+    final samples = shownCategories.isEmpty || shownCategories.contains(HazardCategory.chemical)
+        ? hazardsRepo.liveSamples
+        : const <Sample>[];
+    final zones = _zonesFor(samples);
 
     return Scaffold(
       body: Stack(
@@ -673,6 +709,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 BasemapLayer(local: _localSources, remote: planet, revision: _sourcesKey, mode: mode),
               // Streaming blurs where the device's maps end, so draw it.
               if (streaming) ...savedAreaLayers(_downloaded, scheme, zoom: _zoom),
+              ...sampleZoneLayers(zones, onTapLabel: (_) => _openHazards()),
               spreadLayer([for (final h in hazards) h.hazard]),
               nuclearRingsLayer([for (final h in hazards) h.hazard], settings.nuclearView),
               if (_directions.plan case final plan?) ...routeLayers(plan, scheme),
@@ -698,6 +735,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                     ),
                 ],
+              ),
+              sampleDotLayer(
+                samples,
+                disputed: (s) => hazardsRepo.assessSampleNow(s) == SampleStatus.disputed,
+                onTap: (s) => showSampleDetailsSheet(context, s.id),
               ),
               MarkerLayer(
                 markers: [

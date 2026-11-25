@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../contamination/contaminants.dart';
 import '../hazards/hazard.dart';
 import '../hazards/hazard_events.dart';
 import '../hazards/hazard_repository.dart';
@@ -114,6 +115,10 @@ class TrainingController extends ChangeNotifier {
         final hazard = sandbox.byId(event.hazardId);
         if (hazard != null) {
           _onAction(VotedOnHazard(hazard.type, VoteKind.values.byName(event.payload['kind']! as String)));
+        }
+      case HazardEventKind.sample:
+        if (Contaminant.parse(event.payload['contaminant']) case final contaminant?) {
+          _onAction(AddedSample(contaminant));
         }
       case HazardEventKind.credential:
         break;

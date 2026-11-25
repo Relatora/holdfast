@@ -178,6 +178,41 @@ func TestCredentialsOnlyReachAppsThatAskForThem(t *testing.T) {
 	}
 }
 
+func TestSamplesNeedAPlaceAndOnlyReachAppsThatReadThem(t *testing.T) {
+	ts, _ := newTestServer(t)
+	sample := `{"id":"s1","kind":"sample","hazardId":"sample-1","deviceId":"a","lat":40.8,"lon":-91.26,
+  "at":"2026-11-25T16:00:00Z","payload":{"contaminant":"lead","value":420,"lat":40.8,"lon":-91.26}}`
+	resp := post(t, ts.URL, `{"events":[`+sample+`]}`)
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		t.Fatalf("POST sample: %d", resp.StatusCode)
+	}
+
+	nowhere := `{"id":"s2","kind":"sample","hazardId":"sample-2","deviceId":"a",
+  "at":"2026-11-25T16:00:00Z","payload":{"contaminant":"lead","value":420}}`
+	resp = post(t, ts.URL, `{"events":[`+nowhere+`]}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("a sample without a place: %d, want 400", resp.StatusCode)
+	}
+
+	count := func(query string) int {
+		resp, err := http.Get(ts.URL + "/v1/events?since=0" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(decode[struct {
+			Events []Event `json:"events"`
+		}](t, resp).Events)
+	}
+	if n := count("&kinds=report,vote,credential"); n != 0 {
+		t.Errorf("an app that can't read samples got %d events", n)
+	}
+	if n := count("&kinds=report,vote,credential,sample"); n != 1 {
+		t.Errorf("a new app got %d samples, want 1", n)
+	}
+}
+
 func TestIndexNamesTheNewestPlanetBuild(t *testing.T) {
 	builds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("User-Agent") != "holdfast-server" {

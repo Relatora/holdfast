@@ -16,7 +16,11 @@ enum HazardEventKind {
 
   /// Something a device claims about itself, e.g. "completed every training
   /// scenario". Not tied to a hazard: `hazardId` is `credential:<deviceId>`.
-  credential;
+  credential,
+
+  /// A measured reading (lead in soil, a dose rate). `hazardId` is the
+  /// sample's id, so ordinary votes confirm or dispute it. See `Sample`.
+  sample;
 
   /// The kinds this version understands, sent to the server so it never
   /// hands an older app a kind that app can't parse.
@@ -62,6 +66,17 @@ class HazardEvent {
         deviceId: vote.deviceId,
         at: vote.at,
         payload: vote.toJson(),
+      );
+
+  /// A new contamination reading; [payload] is `Sample.toJson()`.
+  factory HazardEvent.sample(String eventId, {required String sampleId, required String deviceId, required DateTime at, required Map<String, Object?> payload}) =>
+      HazardEvent(
+        id: eventId,
+        kind: HazardEventKind.sample,
+        hazardId: sampleId,
+        deviceId: deviceId,
+        at: at,
+        payload: payload,
       );
 
   /// "This device completed all [scenarios] of training."
@@ -131,8 +146,8 @@ Map<String, Hazard> foldHazardEvents(Iterable<HazardEvent> events) {
         }
       case HazardEventKind.vote:
         votes.putIfAbsent(event.hazardId, () => []).add(HazardVote.fromJson(event.payload));
-      case HazardEventKind.credential:
-        break; // not about a hazard; see trainedDevices
+      case HazardEventKind.credential || HazardEventKind.sample:
+        break; // not about a hazard; see trainedDevices and foldSamples
     }
   }
 

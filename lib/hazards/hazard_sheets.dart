@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
+import '../contamination/sample_sheet.dart';
 import '../map/hazard_marker.dart';
 import '../net/network_gate.dart';
 import '../reputation/achievement_badge.dart';
@@ -27,15 +28,24 @@ Future<void> showReportHazardSheet(BuildContext context, {required double latitu
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    builder: (_) => _ReportHazardSheet(latitude: latitude, longitude: longitude),
+    builder: (_) => _ReportHazardSheet(
+      latitude: latitude,
+      longitude: longitude,
+      // Opened from the caller's context: this sheet is gone by then.
+      onAddReading: () => showAddSampleSheet(context, latitude: latitude, longitude: longitude),
+    ),
   );
 }
 
 class _ReportHazardSheet extends StatefulWidget {
-  const _ReportHazardSheet({required this.latitude, required this.longitude});
+  const _ReportHazardSheet({required this.latitude, required this.longitude, required this.onAddReading});
 
   final double latitude;
   final double longitude;
+
+  /// Switches to the "Add a reading" sheet, for someone with a number
+  /// rather than a sighting.
+  final VoidCallback onAddReading;
 
   @override
   State<_ReportHazardSheet> createState() => _ReportHazardSheetState();
@@ -278,6 +288,17 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
                 label: Text(type == null ? 'Choose a hazard type' : 'Report ${type.label.toLowerCase()}'),
               ),
             ),
+            if (_category == HazardCategory.chemical)
+              Center(
+                child: TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    widget.onAddReading();
+                  },
+                  icon: const Icon(Icons.science_rounded),
+                  label: const Text('Measured something? Add a reading instead'),
+                ),
+              ),
           ],
         ),
       ),
