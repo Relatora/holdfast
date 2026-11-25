@@ -387,7 +387,8 @@ class _RegionTile extends StatelessWidget {
           if (store.updateError(region) case final error?)
             'Update failed: $error'
           else if (update)
-            'Newer map available (${formatBytes(store.sizeOf(region))})'
+            // Other maps' rows already start with their size.
+            isActive ? 'Newer map available (${formatBytes(store.sizeOf(region))})' : 'Newer map available'
           else if (store.builtAt(region) case final built?)
             'Map from ${formatDate(built)}',
         ].join(' · '),

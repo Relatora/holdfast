@@ -355,16 +355,17 @@ class RegionStatusChip extends StatelessWidget {
     super.key,
     required this.region,
     required this.offline,
-    this.updateAvailable = false,
+    this.updates = const [],
     this.onTap,
   });
 
   final Region? region;
   final bool offline;
 
-  /// A newer build of a map on this device is waiting: said on the chip,
-  /// which opens My maps, where the Update button is.
-  final bool updateAvailable;
+  /// Maps on this device with a newer build waiting (not necessarily the
+  /// one on screen). Said on the chip, which opens My maps, where the
+  /// Update button is.
+  final List<Region> updates;
 
   /// Opens the "My maps" switcher.
   final VoidCallback? onTap;
@@ -373,20 +374,15 @@ class RegionStatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final r = region;
     if (r == null) return _Capsule(icon: Icons.map_outlined, text: 'No map yet', onTap: onTap);
-    return _Capsule(
-      icon: updateAvailable
-          ? Icons.update_rounded
-          : offline
-              ? Icons.offline_pin_rounded
-              : Icons.public_rounded,
-      // The update leads: long region names are cut off at the end.
-      text: updateAvailable
-          ? 'Map update ready: ${r.name}'
-          : offline
-              ? 'Offline map: ${r.name}'
-              : 'Streaming: ${r.name}',
-      onTap: onTap,
-    );
+    // The update leads: long names are cut off at the end. It names the map
+    // that has the update, which may not be the one on screen.
+    final (icon, text) = switch (updates) {
+      [final only] => (Icons.update_rounded, 'Map update ready: ${only.name}'),
+      [_, _, ...] => (Icons.update_rounded, '${updates.length} map updates ready'),
+      _ when offline => (Icons.offline_pin_rounded, 'Offline map: ${r.name}'),
+      _ => (Icons.public_rounded, 'Streaming: ${r.name}'),
+    };
+    return _Capsule(icon: icon, text: text, onTap: onTap);
   }
 }
 

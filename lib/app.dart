@@ -9,7 +9,10 @@ import 'theme/theme_reveal.dart';
 
 /// Root widget: wires the theme preference into [MaterialApp].
 class HoldfastApp extends StatelessWidget {
-  const HoldfastApp({super.key});
+  const HoldfastApp({super.key, this.navigatorKey});
+
+  /// Lets a tapped notification open a screen from outside the tree.
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
   Widget build(BuildContext context) {
@@ -24,6 +27,7 @@ class HoldfastApp extends StatelessWidget {
     };
 
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'Holdfast',
       debugShowCheckedModeBanner: false,
       theme: light,

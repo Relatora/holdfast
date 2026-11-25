@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../hazards/hazard_repository.dart';
+import '../notify/notifications.dart';
 import '../reputation/my_reporting_screen.dart';
 import '../training/training_screen.dart';
 import '../theme/app_theme.dart';
@@ -53,6 +54,20 @@ class SettingsScreen extends StatelessWidget {
               ),
               value: settings.offlineMode,
               onChanged: (value) => settings.offlineMode = value,
+            ),
+            ListTile(
+              leading: Icon(
+                settings.updateNotices == UpdateNoticeFrequency.never
+                    ? Icons.notifications_off_outlined
+                    : Icons.notifications_active_outlined,
+              ),
+              title: const Text('Map update notifications'),
+              subtitle: Text(
+                '${settings.updateNotices.label}. Checked when Holdfast starts and every 6 hours while it runs, '
+                'never in offline mode.',
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _chooseUpdateNotices(context, settings),
             ),
           ],
           const _Header('Power & motion'),
@@ -128,6 +143,43 @@ class SettingsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Lets the user pick how often to hear about newer maps. Picking anything
+/// but Never asks for notification permission where the system needs it.
+Future<void> _chooseUpdateNotices(BuildContext context, AppSettings settings) async {
+  final chosen = await showModalBottomSheet<UpdateNoticeFrequency>(
+    context: context,
+    builder: (context) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+            child: Text('Tell me about newer maps', style: Theme.of(context).textTheme.titleLarge),
+          ),
+          for (final option in UpdateNoticeFrequency.values)
+            ListTile(
+              leading: Icon(
+                option == settings.updateNotices ? Icons.check_circle_rounded : Icons.circle_outlined,
+                color: option == settings.updateNotices ? Theme.of(context).colorScheme.primary : null,
+              ),
+              title: Text(option.label),
+              subtitle: Text(option.description),
+              onTap: () => Navigator.pop(context, option),
+            ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
+  if (chosen == null) return;
+  settings.updateNotices = chosen;
+  if (chosen != UpdateNoticeFrequency.never && context.mounted) {
+    settings.notificationPermissionAsked = true;
+    await context.read<Notifications?>()?.requestPermission();
   }
 }
 

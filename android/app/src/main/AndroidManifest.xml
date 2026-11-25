@@ -5,6 +5,9 @@
     <!-- Routes start from where you are. GPS works with no network at all. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Android 13+: map update and thank-you notifications. Asked for after
+         the first map download, not at start-up. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="Holdfast"
         android:name="${applicationName}"

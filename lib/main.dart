@@ -14,8 +14,12 @@ import 'config.dart';
 import 'favorites/favorites_store.dart';
 import 'hazards/hazard_repository.dart';
 import 'net/network_gate.dart';
+import 'notify/notifications.dart';
 import 'regions/region_files.dart';
 import 'regions/region_store.dart';
+import 'regions/regions_screen.dart';
+import 'regions/update_watcher.dart';
+import 'reputation/my_reporting_screen.dart';
 import 'settings/app_settings.dart';
 import 'sync/sync_client.dart';
 
@@ -40,10 +44,31 @@ Future<void> main() async {
     sync: SyncClient(Config.serverUrl, client: GatedClient(network)),
     network: network,
   );
+  // Tapping a notification opens the screen it is about, including one
+  // that launched the app (before the navigator exists: retry after the
+  // first frame).
+  final navigator = GlobalKey<NavigatorState>();
+  void open(NoticeKind kind) {
+    final state = navigator.currentState;
+    if (state == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => open(kind));
+      return;
+    }
+    state.push(MaterialPageRoute<void>(
+      builder: (_) => switch (kind) {
+        NoticeKind.mapUpdates => const RegionsScreen(),
+        NoticeKind.thanks => const MyReportingScreen(),
+      },
+    ));
+  }
+
+  final notifications = await SystemNotifications.start(onTap: open);
+
   // Regions finish loading in the background (the server check can be
   // slow); the home screen shows the map as soon as local state is ready.
   regions.load();
   await hazards.load();
+  UpdateWatcher(regions: regions, settings: settings, notifications: notifications).start();
 
   runApp(
     MultiProvider(
@@ -53,8 +78,9 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: favorites),
         ChangeNotifierProvider.value(value: regions),
         ChangeNotifierProvider.value(value: hazards),
+        Provider<Notifications>.value(value: notifications),
       ],
-      child: const HoldfastApp(),
+      child: HoldfastApp(navigatorKey: navigator),
     ),
   );
 }
