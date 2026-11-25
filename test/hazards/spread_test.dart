@@ -86,4 +86,80 @@ void main() {
       expect(await broken.current(45, -75), isNull);
     });
   });
+
+  group('lead dust', () {
+    test('settles out along a long path, capped at 60 km', () {
+      // From the Army's map for the 2026 Iowa detonation: deposits about
+      // 40 miles (64 km) downwind.
+      final plumes = spreadPlumes(_hazard(HazardType.leadDust, wind: const Wind(fromDegrees: 45, speedKmh: 15)));
+      expect(plumes.map((p) => p.lengthMeters), [15000, 45000, 60000]);
+      final far = plumes.last.outline.reduce((a, b) => a.latitude < b.latitude ? a : b);
+      expect(far.latitude, lessThan(origin.latitude), reason: 'a NE wind carries it south-west');
+      expect(far.longitude, lessThan(origin.longitude));
+    });
+
+    test('drifts with the wind, and is avoided along its plume', () {
+      expect(HazardType.leadDust.spreadsWithWind, isTrue);
+      expect(plumeCircles(_hazard(HazardType.leadDust, wind: westWind)), isNotEmpty);
+    });
+  });
+
+  group('planned releases', () {
+    Hazard planned(Object? startsAt) => Hazard(
+          id: 'p',
+          type: HazardType.leadDust,
+          severity: HazardSeverity.high,
+          latitude: 40.80,
+          longitude: -91.26,
+          reportedBy: 'a',
+          reportedAt: DateTime.utc(2026, 11, 24),
+          details: {'startsAt': startsAt},
+        );
+
+    test('the time round-trips through the report payload', () {
+      final at = DateTime.utc(2026, 11, 25, 15);
+      final details = hazardDetails(startsAt: at, wind: westWind);
+      final hazard = Hazard.fromJson(planned(details['startsAt']).toJson());
+      expect(hazard.startsAt, at);
+      expect(hazard.plannedAt(DateTime.utc(2026, 11, 25, 14)), isTrue);
+      expect(hazard.plannedAt(DateTime.utc(2026, 11, 25, 16)), isFalse, reason: 'it has happened');
+    });
+
+    test('a missing or unreadable time means "happening now"', () {
+      expect(planned(null).startsAt, isNull);
+      expect(planned('next Tuesday').startsAt, isNull);
+      expect(planned(42).startsAt, isNull);
+      expect(planned('next Tuesday').plannedAt(DateTime.utc(2026)), isFalse);
+      expect(hazardDetails(wind: westWind).containsKey('startsAt'), isFalse);
+    });
+
+    test('forecastAt picks the forecast hour nearest the planned time', () async {
+      Uri? asked;
+      final service = WindService(client: MockClient((request) async {
+        asked = request.url;
+        return http.Response(
+          '{"hourly":{"time":["2026-11-25T14:00","2026-11-25T15:00","2026-11-25T16:00"],'
+          '"wind_speed_10m":[10,22,30],"wind_direction_10m":[0,45,90]}}',
+          200,
+        );
+      }));
+      // 09:20 in Iowa (CST, UTC-6) is 15:20 UTC: the 15:00 hour.
+      final wind = await service.forecastAt(40.80, -91.26, DateTime.utc(2026, 11, 25, 15, 20));
+      expect(wind!.fromDegrees, 45);
+      expect(wind.speedKmh, 22);
+      expect(wind.source, WindSource.forecast);
+      expect(asked!.queryParameters['hourly'], 'wind_speed_10m,wind_direction_10m');
+      expect(asked!.queryParameters['timezone'], 'GMT');
+    });
+
+    test('forecastAt says nothing for a time outside the forecast, or offline', () async {
+      final service = WindService(client: MockClient((_) async => http.Response(
+            '{"hourly":{"time":["2026-11-25T14:00"],"wind_speed_10m":[10],"wind_direction_10m":[0]}}',
+            200,
+          )));
+      expect(await service.forecastAt(0, 0, DateTime.utc(2026, 12, 20)), isNull);
+      final offline = WindService(client: MockClient((_) async => throw http.ClientException('offline')));
+      expect(await offline.forecastAt(0, 0, DateTime.utc(2026, 11, 25, 14)), isNull);
+    });
+  });
 }

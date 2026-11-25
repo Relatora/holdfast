@@ -47,6 +47,10 @@ class Plume {
     HazardType.fire => (sourceMeters: 300.0, maxMeters: 30000.0),
     HazardType.radiation => (sourceMeters: 200.0, maxMeters: 50000.0),
     HazardType.volcanicAsh => (sourceMeters: 1000.0, maxMeters: 200000.0),
+    // Lead dust settles out over tens of kilometres: for the 2026 Iowa
+    // detonation the Army mapped meaningful deposits about 40 miles
+    // (64 km) downwind. The bands show where it may have settled.
+    HazardType.leadDust => (sourceMeters: 500.0, maxMeters: 60000.0),
     // Only a ground burst throws up local fallout; an air burst's fireball
     // never touches the ground.
     HazardType.nuclearDetonation when nuclear != null && nuclear.burst == BurstType.surface => (

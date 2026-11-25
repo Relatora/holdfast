@@ -108,7 +108,7 @@ class SettingsScreen extends StatelessWidget {
             secondary: const Icon(Icons.air_rounded),
             title: const Text('Fetch wind for hazards'),
             subtitle: const Text(
-              'When online, "Use current wind" asks Open-Meteo for the wind at a hazard. '
+              'When online, "Use current wind" asks Open-Meteo for the wind at a hazard, now or at a planned time. '
               'Only the hazard\'s position is sent.',
             ),
             value: settings.fetchWind,

@@ -27,6 +27,7 @@ extension HazardTypeStyle on HazardType {
         HazardType.tsunami => Icons.tsunami_rounded,
         HazardType.nuclearDetonation => Icons.brightness_7_rounded,
         HazardType.radiation => Icons.warning_amber_rounded,
+        HazardType.leadDust => Icons.grain_rounded,
         HazardType.other => Icons.report_rounded,
       };
 
@@ -47,6 +48,8 @@ extension HazardTypeStyle on HazardType {
         HazardType.tsunami => const Color(0xFF0277BD),
         HazardType.nuclearDetonation => const Color(0xFFB71C1C),
         HazardType.radiation => const Color(0xFFC6A700),
+        // Lead's own dull blue-grey, darker than ash so the two read apart.
+        HazardType.leadDust => const Color(0xFF546E8A),
         HazardType.other => const Color(0xFF757575),
       };
 }
@@ -195,6 +198,21 @@ class _HazardMarkerState extends State<HazardMarker> with SingleTickerProviderSt
               radius: 9,
               backgroundColor: scheme.surface,
               child: Icon(Icons.question_mark_rounded, size: 13, color: scheme.onSurface),
+            ),
+          ),
+        // A planned release (a scheduled detonation) that hasn't happened
+        // yet: a clock, so it doesn't read as already in the air.
+        if (widget.hazard.plannedAt(DateTime.now()))
+          Positioned(
+            left: HazardMarker.size / 2 - badgeSize / 2 - 6,
+            top: HazardMarker.size / 2 - badgeSize / 2 - 6,
+            child: Semantics(
+              label: 'Planned',
+              child: CircleAvatar(
+                radius: 9,
+                backgroundColor: scheme.surface,
+                child: Icon(Icons.schedule_rounded, size: 13, color: scheme.onSurface),
+              ),
             ),
           ),
       ],

@@ -52,6 +52,11 @@ enum HazardType {
   nuclearDetonation('Nuclear detonation', Duration(days: 30), HazardCategory.chemical),
   radiation('Radiation', Duration(days: 14), HazardCategory.chemical),
 
+  /// Lead dust from a detonation, fire or demolition: it settles downwind
+  /// and stays in soil for decades. Shown for a month; soil samples (which
+  /// last far longer) carry the long tail.
+  leadDust('Lead dust', Duration(days: 30), HazardCategory.chemical),
+
   /// A type this version of the app doesn't know (sent by a newer one).
   /// Shown as a generic hazard rather than mislabelled.
   other('Other hazard', Duration(hours: 12), HazardCategory.other);
@@ -70,7 +75,8 @@ enum HazardType {
         HazardType.chemicalSpill ||
         HazardType.volcanicAsh ||
         HazardType.nuclearDetonation ||
-        HazardType.radiation =>
+        HazardType.radiation ||
+        HazardType.leadDust =>
           true,
         _ => false,
       };

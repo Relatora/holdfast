@@ -65,11 +65,40 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
   WindSource _windSource = WindSource.manual;
   bool _fetchingWind = false;
 
+  /// When a planned release happens (a controlled detonation or burn); null
+  /// for something happening now.
+  DateTime? _startsAt;
+
+  Future<void> _pickStartsAt() async {
+    final now = DateTime.now();
+    final initial = _startsAt ?? now.add(const Duration(hours: 1));
+    final day = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(now.year, now.month, now.day),
+      // Open-Meteo forecasts 16 days ahead; later than that, no wind.
+      lastDate: now.add(const Duration(days: 16)),
+      helpText: 'Planned for',
+    );
+    if (day == null || !mounted) return;
+    final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(initial));
+    if (time == null || !mounted) return;
+    setState(() {
+      _startsAt = DateTime(day.year, day.month, day.day, time.hour, time.minute);
+      // A wind fetched for "now" no longer applies.
+      if (_windSource == WindSource.forecast) _windSource = WindSource.manual;
+    });
+  }
+
+  /// The wind now, or for a planned release the forecast wind at that hour.
   Future<void> _useCurrentWind() async {
     setState(() => _fetchingWind = true);
     final gate = context.read<NetworkGate?>();
-    final wind = await WindService(client: gate == null ? null : GatedClient(gate))
-        .current(widget.latitude, widget.longitude);
+    final service = WindService(client: gate == null ? null : GatedClient(gate));
+    final startsAt = _startsAt;
+    final wind = startsAt != null && startsAt.isAfter(DateTime.now())
+        ? await service.forecastAt(widget.latitude, widget.longitude, startsAt)
+        : await service.current(widget.latitude, widget.longitude);
     if (!mounted) return;
     setState(() {
       _fetchingWind = false;
@@ -115,6 +144,7 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
         nuclear: type == HazardType.nuclearDetonation
             ? NuclearDetails(yieldKt: _yieldKt!, preset: _preset, burst: _burst)
             : null,
+        startsAt: type.spreadsWithWind ? _startsAt : null,
       );
 
   /// Severity the report carries: chosen by the reporter, except where the
@@ -216,7 +246,11 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
             // Step 3: details for the types that have them.
             if (type == HazardType.nuclearDetonation) ..._nuclearInputs(theme),
             if (type == HazardType.radiation) ..._radiationInputs(theme),
-            if (type != null && type.spreadsWithWind) ..._windInputs(theme),
+            if (type != null && type.spreadsWithWind) ...[
+              const SizedBox(height: 12),
+              _plannedInput(theme),
+              ..._windInputs(theme),
+            ],
             if (type != null && type != HazardType.nuclearDetonation && type != HazardType.radiation) ...[
               const SizedBox(height: 20),
               Text('How serious?', style: theme.textTheme.titleSmall),
@@ -356,6 +390,33 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
         ),
       ];
 
+  /// "Happening now", or the time of a planned release.
+  Widget _plannedInput(ThemeData theme) {
+    final startsAt = _startsAt;
+    return Row(
+      children: [
+        const Icon(Icons.schedule_rounded, size: 20),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            startsAt == null ? 'Happening now' : 'Planned: ${formatPlanned(startsAt)}',
+            style: theme.textTheme.bodyMedium,
+          ),
+        ),
+        TextButton(
+          onPressed: _pickStartsAt,
+          child: Text(startsAt == null ? "It's planned…" : 'Change'),
+        ),
+        if (startsAt != null)
+          IconButton(
+            tooltip: 'Happening now instead',
+            onPressed: () => setState(() => _startsAt = null),
+            icon: const Icon(Icons.close_rounded),
+          ),
+      ],
+    );
+  }
+
   List<Widget> _windInputs(ThemeData theme) {
     final wind = Wind(fromDegrees: _windFrom, speedKmh: _windKmh);
     return [
@@ -363,7 +424,7 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
         title: const Text('Add the wind'),
-        subtitle: const Text('Shows where smoke, gas, ash or fallout is likely to drift.'),
+        subtitle: const Text('Shows where smoke, gas, dust, ash or fallout is likely to drift.'),
         value: _withWind,
         onChanged: (v) => setState(() => _withWind = v),
       ),
@@ -377,7 +438,12 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
               icon: _fetchingWind
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.cloud_download_outlined),
-              label: Text(_windSource == WindSource.forecast ? 'Current wind filled in' : 'Use current wind'),
+              label: Text(switch ((_startsAt != null, _windSource == WindSource.forecast)) {
+                (true, true) => 'Forecast wind at ${formatClock(_startsAt!)} filled in',
+                (true, false) => 'Use forecast wind at ${formatClock(_startsAt!)}',
+                (false, true) => 'Current wind filled in',
+                (false, false) => 'Use current wind',
+              }),
             ),
           ),
         const SizedBox(height: 8),
@@ -423,7 +489,18 @@ Widget _staggered(bool animate, int index, Widget child) => animate
 /// The type-specific facts a report carries, as rows for the details sheet.
 List<Widget> _detailRows(Hazard hazard, ThemeData theme) {
   final nuclear = hazard.nuclear, radiation = hazard.radiation, wind = hazard.wind;
+  final startsAt = hazard.startsAt;
+  final planned = hazard.plannedAt(DateTime.now());
   return [
+    if (startsAt != null)
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(planned ? Icons.schedule_rounded : Icons.history_rounded),
+        title: Text(planned ? 'Planned: ${formatPlanned(startsAt)}' : 'Planned for ${formatPlanned(startsAt)}'),
+        subtitle: Text(planned
+            ? 'The plume shows where it would drift at that time.'
+            : 'That time has passed. Confirm or clear this report if you know whether it happened.'),
+      ),
     if (nuclear != null)
       ListTile(
         contentPadding: EdgeInsets.zero,
@@ -449,8 +526,12 @@ List<Widget> _detailRows(Hazard hazard, ThemeData theme) {
         title: Text('Likely spread: ${[
           for (final p in plumes) '${p.hours} h → ${(p.lengthMeters / 1000).toStringAsFixed(p.lengthMeters < 10000 ? 1 : 0)} km'
         ].join(', ')}'),
-        subtitle: const Text('Downwind, widening as it goes. An estimate: terrain and weather change it.'),
+        subtitle: Text(hazard.type == HazardType.leadDust
+            ? 'Dust settles along this path. Soil and surfaces may stay contaminated; '
+                'test before children play outside. An estimate: terrain and weather change it.'
+            : 'Downwind, widening as it goes. An estimate: terrain and weather change it.'),
       ),
+    if (hazard.type == HazardType.leadDust) const _LeadGuidance(),
     if (hazard.type == HazardType.tsunami)
       const ListTile(
         contentPadding: EdgeInsets.zero,
@@ -474,9 +555,72 @@ List<Widget> _detailRows(Hazard hazard, ThemeData theme) {
           child: const Icon(Icons.navigation_rounded),
         ),
         title: Text('Wind ${wind.strength}, ${wind.summary}'),
-        subtitle: Text(wind.source == WindSource.forecast ? 'From a weather forecast' : 'Reported by hand'),
+        subtitle: Text(switch ((wind.source, startsAt)) {
+          (WindSource.forecast, final DateTime at) => 'Forecast wind at ${formatClock(at)}',
+          (WindSource.forecast, null) => 'From a weather forecast',
+          (WindSource.manual, _) => 'Reported by hand',
+        }),
       ),
   ];
+}
+
+/// "Wed 09:00" within the coming week, "Wed 3 Dec 09:00" otherwise; local time.
+String formatPlanned(DateTime at) {
+  final local = at.toLocal();
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  final soon = local.difference(DateTime.now()).abs() < const Duration(days: 6);
+  final day = days[local.weekday - 1];
+  return soon ? '$day ${formatClock(local)}' : '$day ${local.day} ${months[local.month - 1]} ${formatClock(local)}';
+}
+
+/// "09:00", local time.
+String formatClock(DateTime at) {
+  final local = at.toLocal();
+  return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+}
+
+/// What to do about lead dust, after the U.S. Army's public advice for the
+/// 2026 Iowa Army Ammunition Plant lead azide detonation and the EPA's lead
+/// guidance. Lead harms slowly: the advice is about not breathing in or
+/// swallowing the dust, above all for small children.
+class _LeadGuidance extends StatelessWidget {
+  const _LeadGuidance();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    Widget item(IconData icon, String title, String body) => ListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          leading: Icon(icon),
+          title: Text(title, style: theme.textTheme.titleSmall),
+          subtitle: Text(body),
+        );
+    return Card(
+      margin: const EdgeInsets.only(top: 10),
+      color: HazardType.leadDust.color.withValues(alpha: 0.12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            item(Icons.child_care_rounded, 'Most at risk',
+                'Children under 6, pregnant women and people with chronic illness. Protect them first.'),
+            item(Icons.home_rounded, 'Shelter in place',
+                'Close windows and doors. Set heating or air conditioning to recirculate and turn off exhaust '
+                    'fans. Cover animal feed and water.'),
+            item(Icons.cleaning_services_rounded, 'Afterwards',
+                'Wet-wipe and mop surfaces children touch. Never sweep or dry-dust: it lifts the dust again. '
+                    'Wash hands, toys and garden produce.'),
+            item(Icons.science_rounded, 'Get tested',
+                'Have soil tested before children play on it or you grow food there. A blood lead test shows '
+                    'exposure from about the past month.'),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Bottom sheet showing a hazard's status, time left and vote buttons.
