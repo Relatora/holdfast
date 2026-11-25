@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,7 @@ type fakeBuilder struct {
 	failMap    bool
 	failPois   bool
 	failRoutes bool
+	cells      bool // a tower source is configured
 	maps       atomic.Int32
 }
 
@@ -48,6 +50,12 @@ func (b *fakeBuilder) BuildPois(_ context.Context, r CatalogRegion) error {
 
 func (b *fakeBuilder) BuildPopulation(_ context.Context, r CatalogRegion) error {
 	return os.WriteFile(filepath.Join(b.dir, r.ID+".population.bin"), []byte("HFPP"), 0o644)
+}
+
+func (b *fakeBuilder) BuildsCells() bool { return b.cells }
+
+func (b *fakeBuilder) BuildCells(_ context.Context, r CatalogRegion) error {
+	return os.WriteFile(filepath.Join(b.dir, r.ID+".cells.bin"), []byte("HFCT"), 0o644)
 }
 
 func (b *fakeBuilder) BuildRoutes(_ context.Context, r CatalogRegion) error {
@@ -405,5 +413,67 @@ func TestIndexReportsBuiltAtAndRefreshEndpoint(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("refreshing a region that isn't hosted: %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestCellsAreBuiltOnlyWithATowerSource(t *testing.T) {
+	cells := "sarnia.cells.bin"
+
+	// No OpenCelliD token: no tower pack, and the region still counts as
+	// complete, so asking again doesn't rebuild it every time.
+	b := &fakeBuilder{dir: t.TempDir()}
+	p := newPreparer(t, b)
+	if _, err := p.Start("sarnia"); err != nil {
+		t.Fatal(err)
+	}
+	if job := waitFor(t, p, "sarnia"); job.State != JobDone || job.Note != "" {
+		t.Fatalf("job = %+v", job)
+	}
+	if _, err := os.Stat(filepath.Join(b.dir, cells)); err == nil {
+		t.Fatal("cells built without a tower source")
+	}
+	if !p.complete(testCatalog["sarnia"]) {
+		t.Fatal("a region without a tower source should be complete")
+	}
+
+	// With one, the pack is built alongside the rest.
+	b = &fakeBuilder{dir: t.TempDir(), cells: true}
+	p = newPreparer(t, b)
+	if _, err := p.Start("sarnia"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, p, "sarnia")
+	if _, err := os.Stat(filepath.Join(b.dir, cells)); err != nil {
+		t.Fatalf("cells missing: %v", err)
+	}
+	// Countries don't get one: a phone only needs the towers around it.
+	if wantsCells(testCatalog["mexico"]) {
+		t.Fatal("a country should not get a tower pack")
+	}
+}
+
+func TestIndexListsTheCellsPack(t *testing.T) {
+	dir := t.TempDir()
+	for name, size := range map[string]int{"sarnia.pmtiles": 10, "sarnia.cells.bin": 7} {
+		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := &Server{regionsDir: dir}
+	rec := httptest.NewRecorder()
+	srv.regionIndex(rec, httptest.NewRequest("GET", "/regions/index.json", nil))
+	var body struct {
+		Regions map[string]struct {
+			CellsBytes *int64 `json:"cellsBytes"`
+		} `json:"regions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := body.Regions["sarnia"].CellsBytes; got == nil || *got != 7 {
+		t.Fatalf("cellsBytes = %v, want 7", got)
+	}
+	if !regionFileName.MatchString("sarnia.cells.bin") {
+		t.Fatal("the cells pack must be downloadable")
 	}
 }

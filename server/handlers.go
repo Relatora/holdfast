@@ -180,7 +180,7 @@ func parseBBox(raw string) (BBox, error) {
 
 // Only plain region file names are served, which rules out path traversal
 // ("../../etc/passwd") without having to reason about cleaned paths.
-var regionFileName = regexp.MustCompile(`^[a-z0-9-]+\.(pmtiles|pois\.json|routing\.bin|population\.bin)$`)
+var regionFileName = regexp.MustCompile(`^[a-z0-9-]+\.(pmtiles|pois\.json|routing\.bin|population\.bin|cells\.bin)$`)
 
 // regionIndex lists the region files actually present, with real sizes, so
 // the app can show which catalog regions are downloadable and how big.
@@ -190,6 +190,7 @@ func (s *Server) regionIndex(w http.ResponseWriter, _ *http.Request) {
 		PoisBytes       *int64 `json:"poisBytes,omitempty"`
 		RoutingBytes    *int64 `json:"routingBytes,omitempty"`
 		PopulationBytes *int64 `json:"populationBytes,omitempty"`
+		CellsBytes      *int64 `json:"cellsBytes,omitempty"`
 		// BuiltAt is when the region's files last changed; an app whose
 		// copy is older offers an update.
 		BuiltAt time.Time `json:"builtAt"`
@@ -214,6 +215,10 @@ func (s *Server) regionIndex(w http.ResponseWriter, _ *http.Request) {
 		if population, err := os.Stat(filepath.Join(s.regionsDir, id+".population.bin")); err == nil {
 			size := population.Size()
 			e.PopulationBytes = &size
+		}
+		if cells, err := os.Stat(filepath.Join(s.regionsDir, id+".cells.bin")); err == nil {
+			size := cells.Size()
+			e.CellsBytes = &size
 		}
 		regions[id] = e
 	}

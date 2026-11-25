@@ -44,7 +44,11 @@ enum SidePack {
   routing('routing.bin', 'routingBytes'),
 
   /// People per grid cell, for casualty estimates (`PopulationGrid`).
-  population('population.bin', 'populationBytes');
+  population('population.bin', 'populationBytes'),
+
+  /// Where the region's cell towers are, for offline positioning when GPS
+  /// can't get a fix (`CellPack`).
+  cells('cells.bin', 'cellsBytes');
 
   const SidePack(this.extension, this.indexKey);
 

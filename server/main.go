@@ -69,6 +69,10 @@ func main() {
 			Python:   envOr("PYTHON", "python"),
 			ToolsDir: envOr("TOOLS_DIR", "../tool"),
 			OutDir:   regionsDir,
+			Cells:    os.Getenv("OPENCELLID_TOKEN") != "",
+		}
+		if !builder.Cells {
+			log.Printf("offline tower positioning off: set OPENCELLID_TOKEN (free at opencellid.org)")
 		}
 		server.preparer = NewPreparer(ctx, regionsDir, catalog, builder, maxBytes)
 		log.Printf("preparing regions up to %d MB on demand", maxBytes/1e6)
