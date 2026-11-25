@@ -20,6 +20,10 @@ Built with **Flutter** (one codebase for Android, iOS, Windows, macOS, Linux and
 | **Offline directions** | Walk, bike, drive or take the train, computed on the device from the downloaded road and rail network, with step-by-step street names. Routes keep clear of reported hazards. |
 | **Nearest supplies** | A radar sweep finds the closest place of each kind. |
 | **Community hazards** | Long-press to report a fire, flood, blocked road or gas leak. A report is shown to everyone once people nearby confirm it, and expires when nobody does. |
+| **Place an incident anywhere** | Put a detonation, chemical or radioactive leak, volcanic eruption or tsunami under a pin, by moving the map or typing a street, crossing or address, and see its plume, danger zone or wave arrival rings before reporting it. Airports a hazard would likely close are flagged. |
+| **Hazards that move** | Wind streaks, drifting chemical puffs, radioactive sparks, lead dust, ash and smoke, tsunami fronts and an erupting vent animate over the plumes. |
+| **Readings and real events** | Soil and radiation readings graded against EPA and Chernobyl-zone levels, with an estimated contamination zone. Real events, like the 2026 Iowa lead azide detonation, carry a link to their official source. |
+| **Phone and PC alike** | The Windows app has everything the phone app has: Windows location, right-click for long-press, and keyboard shortcuts (Ctrl+F, +/−, L, R). |
 | **Three palettes + system** | Light for sunlight, dark for dusk, and **night vision**: pure red on black, which preserves dark-adapted eyes. Switching plays a circular reveal. |
 | **Battery saver** | One switch turns off every decorative animation. The OS "reduce motion" setting is honoured too. |
 
@@ -86,4 +90,4 @@ The MVP milestone covers offline maps, supplies, hazards and sync. Next up (see 
 
 ## Data and licences
 
-Code: MIT. Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, ODbL 1.0; the supply packs are derived databases under the same licence. Basemap tiles and styles by [Protomaps](https://protomaps.com). Cell-tower positions from [OpenCelliD](https://opencellid.org), CC BY-SA 4.0. Hazard reports come from users and can be wrong: always follow local authorities.
+Code: MIT. Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, ODbL 1.0; the supply packs are derived databases under the same licence. Basemap tiles and styles by [Protomaps](https://protomaps.com). Cell-tower positions from [OpenCelliD](https://opencellid.org), CC BY-SA 4.0. Online address search by [Photon](https://photon.komoot.io) (Komoot), from OpenStreetMap data. Weather from [Open-Meteo](https://open-meteo.com), CC BY 4.0. Hazard reports come from users and can be wrong: always follow local authorities.

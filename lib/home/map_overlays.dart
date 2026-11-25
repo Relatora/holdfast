@@ -454,6 +454,8 @@ class AttributionChip extends StatelessWidget {
             'Basemap tiles and styles by Protomaps (protomaps.com), styles CC0.\n\n'
             'Cell-tower positions, for finding you when GPS can\'t: OpenCelliD '
             '(opencellid.org), CC BY-SA 4.0.\n\n'
+            'Online address search: Photon by Komoot (photon.komoot.io), built on '
+            'OpenStreetMap data.\n\n'
             'Hazard reports come from Holdfast users and may be wrong or out of '
             'date. Always follow instructions from local authorities.',
           ),
