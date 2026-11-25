@@ -271,3 +271,139 @@ func TestPrepareEndpoints(t *testing.T) {
 		t.Fatalf("index = %+v", index)
 	}
 }
+
+// hostSarnia writes a complete set of Sarnia files dated [age] ago.
+func hostSarnia(t *testing.T, dir string, age time.Duration) {
+	t.Helper()
+	when := time.Now().Add(-age)
+	for _, name := range regionFiles("sarnia") {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		os.Chtimes(path, when, when)
+	}
+}
+
+func TestRefreshRebuildsFromFreshDataButKeepsPopulation(t *testing.T) {
+	b := &fakeBuilder{dir: t.TempDir()}
+	hostSarnia(t, b.dir, 40*24*time.Hour)
+	before := BuiltAt(b.dir, "sarnia")
+	p := newPreparer(t, b)
+
+	b.release = make(chan struct{})
+	job, err := p.Refresh("sarnia")
+	if err != nil || !job.Refresh {
+		t.Fatalf("Refresh = %+v, %v", job, err)
+	}
+	// Apps resume every job index.json lists by downloading its region, so
+	// a refresh must not be listed.
+	if _, listed := p.Active()["sarnia"]; listed {
+		t.Fatal("a refresh job is listed as active")
+	}
+	close(b.release)
+	if job := waitFor(t, p, "sarnia"); job.State != JobDone {
+		t.Fatalf("job = %+v", job)
+	}
+	if b.maps.Load() != 1 {
+		t.Fatal("the map was not rebuilt")
+	}
+	for _, name := range []string{"sarnia.pois.json", "sarnia.routing.bin"} {
+		if data, _ := os.ReadFile(filepath.Join(b.dir, name)); string(data) == "old" {
+			t.Errorf("%s was not rebuilt", name)
+		}
+	}
+	if data, _ := os.ReadFile(filepath.Join(b.dir, "sarnia.population.bin")); string(data) != "old" {
+		t.Error("the population grid comes from a fixed dataset and should be kept")
+	}
+	if after := BuiltAt(b.dir, "sarnia"); !after.After(before) {
+		t.Fatalf("builtAt did not move: %v -> %v", before, after)
+	}
+}
+
+func TestFailedRefreshKeepsTheOldMap(t *testing.T) {
+	b := &fakeBuilder{dir: t.TempDir(), failMap: true}
+	hostSarnia(t, b.dir, 40*24*time.Hour)
+	p := newPreparer(t, b)
+	p.Refresh("sarnia")
+	if job := waitFor(t, p, "sarnia"); job.State != JobFailed {
+		t.Fatalf("job = %+v", job)
+	}
+	if data, _ := os.ReadFile(filepath.Join(b.dir, "sarnia.pmtiles")); string(data) != "old" {
+		t.Fatal("a failed refresh must leave the hosted map alone")
+	}
+}
+
+func TestRefreshNeedsAHostedRegion(t *testing.T) {
+	p := newPreparer(t, &fakeBuilder{dir: t.TempDir()})
+	if _, err := p.Refresh("sarnia"); !errors.Is(err, errNotHosted) {
+		t.Fatalf("err = %v, want errNotHosted", err)
+	}
+	if _, err := p.Refresh("world"); !errors.Is(err, errStreamed) {
+		t.Fatalf("world: err = %v, want errStreamed", err)
+	}
+}
+
+func TestAutoRefreshPicksOnlyOldRegionsAndBacksOff(t *testing.T) {
+	b := &fakeBuilder{dir: t.TempDir(), failMap: true}
+	hostSarnia(t, b.dir, 40*24*time.Hour)
+	os.WriteFile(filepath.Join(b.dir, "mexico.pmtiles"), []byte("new"), 0o644) // built just now
+	p := newPreparer(t, b)
+	now := time.Now()
+	month := 30 * 24 * time.Hour
+
+	if due := p.refreshDue(now, month); len(due) != 1 || due[0] != "sarnia" {
+		t.Fatalf("due = %v, want [sarnia]", due)
+	}
+	waitFor(t, p, "sarnia") // fails: the map is still old
+
+	// An hour later the failed region is not retried yet...
+	if due := p.refreshDue(now.Add(time.Hour), month); len(due) != 0 {
+		t.Fatalf("retried after an hour: %v", due)
+	}
+	// ...but a day later it is.
+	if due := p.refreshDue(now.Add(25*time.Hour), month); len(due) != 1 {
+		t.Fatalf("not retried after a day: %v", due)
+	}
+	waitFor(t, p, "sarnia")
+}
+
+func TestIndexReportsBuiltAtAndRefreshEndpoint(t *testing.T) {
+	b := &fakeBuilder{dir: t.TempDir()}
+	hostSarnia(t, b.dir, 40*24*time.Hour)
+	s := &Server{store: NewMemoryStore(), regionsDir: b.dir, preparer: newPreparer(t, b)}
+	ts := httptest.NewServer(s.Routes())
+	t.Cleanup(ts.Close)
+
+	builtAt := func() time.Time {
+		resp, err := http.Get(ts.URL + "/regions/index.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		index := decode[struct {
+			Regions map[string]struct {
+				BuiltAt time.Time `json:"builtAt"`
+			} `json:"regions"`
+		}](t, resp)
+		return index.Regions["sarnia"].BuiltAt
+	}
+	old := builtAt()
+	if age := time.Since(old); age < 39*24*time.Hour || age > 41*24*time.Hour {
+		t.Fatalf("builtAt = %v, want about 40 days ago", old)
+	}
+
+	resp, _ := http.Post(ts.URL+"/regions/sarnia/refresh", "", nil)
+	if job := decode[Job](t, resp); resp.StatusCode != http.StatusAccepted || !job.Refresh {
+		t.Fatalf("POST refresh: %d %+v", resp.StatusCode, job)
+	}
+	waitFor(t, s.preparer, "sarnia")
+	if fresh := builtAt(); !fresh.After(old) {
+		t.Fatalf("builtAt after refresh = %v, was %v", fresh, old)
+	}
+
+	resp, _ = http.Post(ts.URL+"/regions/mexico/refresh", "", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("refreshing a region that isn't hosted: %d, want 404", resp.StatusCode)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -41,6 +42,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /regions/{file}", s.regionFile)
 	mux.HandleFunc("POST /regions/{id}/prepare", s.startPrepare)
 	mux.HandleFunc("GET /regions/{id}/prepare", s.prepareStatus)
+	mux.HandleFunc("POST /regions/{id}/refresh", s.startRefresh)
 	return withCORS(mux)
 }
 
@@ -183,6 +185,9 @@ func (s *Server) regionIndex(w http.ResponseWriter, _ *http.Request) {
 		PoisBytes       *int64 `json:"poisBytes,omitempty"`
 		RoutingBytes    *int64 `json:"routingBytes,omitempty"`
 		PopulationBytes *int64 `json:"populationBytes,omitempty"`
+		// BuiltAt is when the region's files last changed; an app whose
+		// copy is older offers an update.
+		BuiltAt time.Time `json:"builtAt"`
 	}
 	regions := map[string]entry{}
 	matches, _ := filepath.Glob(filepath.Join(s.regionsDir, "*.pmtiles"))
@@ -192,7 +197,7 @@ func (s *Server) regionIndex(w http.ResponseWriter, _ *http.Request) {
 			continue
 		}
 		id := strings.TrimSuffix(filepath.Base(path), ".pmtiles")
-		e := entry{PmtilesBytes: info.Size()}
+		e := entry{PmtilesBytes: info.Size(), BuiltAt: BuiltAt(s.regionsDir, id).UTC().Truncate(time.Second)}
 		if pois, err := os.Stat(filepath.Join(s.regionsDir, id+".pois.json")); err == nil {
 			size := pois.Size()
 			e.PoisBytes = &size
@@ -236,6 +241,34 @@ func (s *Server) startPrepare(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errTooBig):
 		httpError(w, http.StatusRequestEntityTooLarge,
 			"%s is larger than this server prepares on demand (%d MB)", id, s.preparer.MaxBytes()/1e6)
+	case errors.Is(err, errStreamed):
+		httpError(w, http.StatusConflict, "%s streams from its own source", id)
+	case err != nil:
+		httpError(w, http.StatusInternalServerError, "%v", err)
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(job)
+	}
+}
+
+// startRefresh queues a rebuild of a hosted region from fresh data: 202 with
+// the job, which GET /regions/{id}/prepare then follows. It's an operator's
+// tool (the server also refreshes old regions by itself, see AutoRefresh);
+// apps only notice the result, through builtAt in index.json.
+func (s *Server) startRefresh(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.preparer == nil || !regionID.MatchString(id) {
+		http.NotFound(w, r)
+		return
+	}
+	job, err := s.preparer.Refresh(id)
+	switch {
+	case errors.Is(err, errUnknownRegion), errors.Is(err, errNotHosted):
+		httpError(w, http.StatusNotFound, "%s: %v", id, err)
+	case errors.Is(err, errTooBig):
+		httpError(w, http.StatusRequestEntityTooLarge,
+			"%s is larger than this server builds (%d MB)", id, s.preparer.MaxBytes()/1e6)
 	case errors.Is(err, errStreamed):
 		httpError(w, http.StatusConflict, "%s streams from its own source", id)
 	case err != nil:
