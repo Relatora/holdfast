@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'windows_location.dart';
+
 /// Where a position came from. It decides how the map draws it: a GPS fix
 /// is a dot, anything rougher is a wide circle that never passes for one.
 enum FixSource {
@@ -77,6 +79,11 @@ abstract interface class LocationPlatform {
 
   Future<bool> openLocationSettings();
   Future<bool> openAppSettings();
+
+  /// How a position asked for with [precise] was found. On a phone a
+  /// precise request is answered by GPS; on a PC, Windows answers it from
+  /// Wi-Fi unless the PC has a GPS receiver, and says which.
+  FixSource sourceOf(Position position, {required bool precise});
 }
 
 /// [LocationPlatform] over the geolocator plugin.
@@ -112,7 +119,17 @@ class GeolocatorPlatformAdapter implements LocationPlatform {
 
   @override
   Future<bool> openAppSettings() => Geolocator.openAppSettings();
+
+  @override
+  FixSource sourceOf(Position position, {required bool precise}) => precise ? FixSource.gps : FixSource.network;
 }
+
+/// The location service of the platform the app runs on: the Windows
+/// location service on Windows (which geolocator doesn't cover), the
+/// geolocator plugin everywhere else.
+LocationPlatform defaultLocationPlatform() => !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
+    ? WindowsLocationPlatform()
+    : const GeolocatorPlatformAdapter();
 
 /// Finds the device on the map, by GPS first and more roughly when that
 /// fails, and remembers the last position for the location dot and for
@@ -123,10 +140,10 @@ class GeolocatorPlatformAdapter implements LocationPlatform {
 /// [LocateProblem] and lets the person choose [approximate].
 class DeviceLocator extends ChangeNotifier {
   DeviceLocator({
-    LocationPlatform platform = const GeolocatorPlatformAdapter(),
+    LocationPlatform? platform,
     this.gpsTimeLimit = const Duration(seconds: 10),
     DateTime Function()? clock,
-  })  : _platform = platform, // ignore: prefer_initializing_formals (private field, public name)
+  })  : _platform = platform ?? defaultLocationPlatform(),
         _clock = clock ?? DateTime.now;
 
   final LocationPlatform _platform;
@@ -162,7 +179,7 @@ class DeviceLocator extends ChangeNotifier {
         if (await _permissionProblem() case final problem?) return LocateFailed(problem);
         try {
           final p = await _platform.position(precise: true, timeLimit: gpsTimeLimit);
-          return Located(_fixFrom(p, FixSource.gps));
+          return Located(_fixFrom(p, _platform.sourceOf(p, precise: true)));
         } catch (_) {
           // Location may have been switched off while waiting for a fix:
           // then the way out is to turn it back on, not a rougher method.

@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
+import '../platform/pointer.dart';
 import '../settings/app_settings.dart';
 import 'app_theme_mode.dart';
 import 'motion.dart';
@@ -34,7 +35,8 @@ Future<void> switchTheme(BuildContext context, AppThemeMode mode, Offset origin)
   );
 }
 
-/// Map-screen button: tap to cycle palettes, long-press to pick one.
+/// Map-screen button: tap to cycle palettes, long-press (or right-click) to
+/// pick one.
 class ThemeToggleButton extends StatelessWidget {
   const ThemeToggleButton({super.key});
 
@@ -56,9 +58,10 @@ class ThemeToggleButton extends StatelessWidget {
     final brightness = MediaQuery.platformBrightnessOf(context);
     final resolved = resolveThemeMode(mode, brightness);
     return Tooltip(
-      message: 'Theme: ${resolved.label} (long-press for all)',
+      message: 'Theme: ${resolved.label} ($secondaryPress for all)',
       child: GestureDetector(
         onLongPress: () => showThemePicker(context),
+        onSecondaryTap: () => showThemePicker(context),
         child: FloatingActionButton.small(
           heroTag: 'theme',
           onPressed: () => switchTheme(

@@ -53,6 +53,9 @@ class _FakeDevice implements LocationPlatform {
 
   @override
   Future<bool> openAppSettings() async => true;
+
+  @override
+  FixSource sourceOf(Position position, {required bool precise}) => precise ? FixSource.gps : FixSource.network;
 }
 
 /// Location is on when the attempt starts, and off by the time GPS gives up.

@@ -24,15 +24,20 @@ class PlaceSearchBar extends StatelessWidget {
     required this.index,
     required this.onSelected,
     required this.onOpenSettings,
+    this.controller,
   });
 
   final PoiIndex index;
+
+  /// Lets the map screen open the search from a keyboard shortcut.
+  final SearchController? controller;
   final ValueChanged<Poi> onSelected;
   final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
     return SearchAnchor(
+      searchController: controller,
       builder: (context, controller) => SearchBar(
         controller: controller,
         hintText: index.isEmpty ? 'Download a map to search' : 'Search Walmart, pharmacy, water…',
