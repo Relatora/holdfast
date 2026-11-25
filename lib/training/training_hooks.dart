@@ -8,6 +8,7 @@ library;
 
 import 'dart:async';
 
+import '../contamination/contaminants.dart';
 import '../hazards/hazard.dart';
 import '../pois/poi.dart';
 import '../routing/router.dart';
@@ -44,6 +45,17 @@ class OpenedPlace extends TrainingAction {
 class FilteredHazards extends TrainingAction {
   const FilteredHazards(this.shown);
   final Set<HazardCategory> shown;
+}
+
+/// The player added a contamination reading.
+class AddedSample extends TrainingAction {
+  const AddedSample(this.contaminant);
+  final Contaminant contaminant;
+}
+
+/// The player found their location (any method).
+class FoundMyLocation extends TrainingAction {
+  const FoundMyLocation();
 }
 
 class PlannedRoute extends TrainingAction {

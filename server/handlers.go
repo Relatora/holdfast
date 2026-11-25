@@ -102,16 +102,16 @@ func validate(e Event) error {
 	switch {
 	case e.ID == "" || len(e.ID) > 64:
 		return fmt.Errorf("%w: id must be 1-64 characters", errInvalid)
-	case e.Kind != "report" && e.Kind != "vote" && e.Kind != "credential":
-		return fmt.Errorf("%w: kind must be report, vote or credential", errInvalid)
+	case e.Kind != "report" && e.Kind != "vote" && e.Kind != "credential" && e.Kind != "sample":
+		return fmt.Errorf("%w: kind must be report, vote, credential or sample", errInvalid)
 	case e.HazardID == "" || e.DeviceID == "":
 		return fmt.Errorf("%w: hazardId and deviceId are required", errInvalid)
 	case e.At.IsZero():
 		return fmt.Errorf("%w: at is required", errInvalid)
 	case len(e.Payload) == 0 || len(e.Payload) > maxPayload:
 		return fmt.Errorf("%w: payload must be 1-%d bytes", errInvalid, maxPayload)
-	case e.Kind == "report" && (e.Lat == nil || e.Lon == nil):
-		return fmt.Errorf("%w: reports need lat and lon", errInvalid)
+	case (e.Kind == "report" || e.Kind == "sample") && (e.Lat == nil || e.Lon == nil):
+		return fmt.Errorf("%w: %ss need lat and lon", errInvalid, e.Kind)
 	case e.Lat != nil && (*e.Lat < -90 || *e.Lat > 90):
 		return fmt.Errorf("%w: lat out of range", errInvalid)
 	case e.Lon != nil && (*e.Lon < -180 || *e.Lon > 180):

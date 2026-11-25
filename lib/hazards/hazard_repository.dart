@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../contamination/contaminants.dart';
+import '../contamination/sample.dart';
 import '../net/network_gate.dart';
 import '../sync/sync_client.dart';
 import 'hazard.dart';
@@ -94,6 +96,9 @@ class HazardRepository extends ChangeNotifier {
   int _cursor = 0;
   Map<String, Hazard> _hazards = const {};
 
+  /// Contamination readings, folded from the same log.
+  Map<String, Sample> _samples = const {};
+
   /// Every device's track record, rebuilt with the hazards.
   Map<String, ReporterRecord> _reputation = const {};
 
@@ -114,6 +119,19 @@ class HazardRepository extends ChangeNotifier {
 
   Iterable<Hazard> get hazards => _hazards.values;
   Hazard? byId(String id) => _hazards[id];
+
+  Iterable<Sample> get samples => _samples.values;
+  Sample? sampleById(String id) => _samples[id];
+
+  /// Where a sample stands now, with reputation-weighted votes.
+  SampleStatus assessSampleNow(Sample sample) =>
+      assessSample(sample, now, reputation: (device) => weightOf(_reputation, device));
+
+  /// Samples to draw: not expired, and not rejected by others.
+  List<Sample> get liveSamples => [
+        for (final s in _samples.values)
+          if (assessSampleNow(s) case SampleStatus.shown || SampleStatus.disputed) s,
+      ];
   /// Assesses with reputation: reliable reporters' votes count for more.
   HazardAssessment assess(Hazard hazard) =>
       assessHazard(hazard, now, reputation: (device) => weightOf(_reputation, device));
@@ -206,7 +224,42 @@ class HazardRepository extends ChangeNotifier {
     return hazard;
   }
 
-  /// Records this device's "still there" or "it's gone" vote.
+  /// Adds a contamination reading from this device and returns it.
+  Future<Sample> addSample({
+    required Contaminant contaminant,
+    required double value,
+    required SampleMethod method,
+    required double latitude,
+    required double longitude,
+    DateTime? takenAt,
+    double? depthCm,
+    String note = '',
+  }) async {
+    final sample = Sample(
+      id: _uuid.v4(),
+      contaminant: contaminant,
+      value: value,
+      method: method,
+      latitude: latitude,
+      longitude: longitude,
+      reportedBy: deviceId,
+      reportedAt: now.toUtc(),
+      takenAt: takenAt?.toUtc(),
+      depthCm: depthCm,
+      note: note.trim(),
+    );
+    await _record(HazardEvent.sample(
+      _uuid.v4(),
+      sampleId: sample.id,
+      deviceId: deviceId,
+      at: sample.reportedAt,
+      payload: sample.toJson(),
+    ));
+    return sample;
+  }
+
+  /// Records this device's "still there" or "it's gone" vote. On a sample
+  /// it means "matches what I measured" or "looks wrong".
   Future<void> vote(String hazardId, VoteKind kind, {double? distanceMeters}) => _record(
         HazardEvent.vote(
           _uuid.v4(),
@@ -322,6 +375,7 @@ class HazardRepository extends ChangeNotifier {
 
   void _refold() {
     _hazards = foldHazardEvents(_log);
+    _samples = foldSamples(_log);
     _reputation = computeReputation(_hazards.values, now, trained: trainedDevices(_log));
     _noticeNewConfirmations();
   }
