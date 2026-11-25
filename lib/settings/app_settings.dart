@@ -36,6 +36,7 @@ class AppSettings extends ChangeNotifier {
   static const _kNuclearView = 'nuclearView';
   static const _kFetchWind = 'fetchWind';
   static const _kOfflineMode = 'offlineMode';
+  static const _kStreamWorld = 'streamWorld';
   static const _kUpdateNotices = 'updateNotices';
   static const _kAnnouncedUpdates = 'announcedUpdates';
   static const _kLastUpdateNotice = 'lastUpdateNotice';
@@ -101,6 +102,14 @@ class AppSettings extends ChangeNotifier {
   bool get offlineMode => _prefs.getBool(_kOfflineMode) ?? false;
   set offlineMode(bool value) {
     _prefs.setBool(_kOfflineMode, value);
+    notifyListeners();
+  }
+
+  /// Online, show the world beyond the downloaded maps by streaming it.
+  /// Downloaded areas always come from the device either way.
+  bool get streamWorld => _prefs.getBool(_kStreamWorld) ?? true;
+  set streamWorld(bool value) {
+    _prefs.setBool(_kStreamWorld, value);
     notifyListeners();
   }
 

@@ -55,6 +55,17 @@ class SettingsScreen extends StatelessWidget {
               value: settings.offlineMode,
               onChanged: (value) => settings.offlineMode = value,
             ),
+            SwitchListTile(
+              secondary: const Icon(Icons.public_rounded),
+              title: const Text('Show the world beyond your maps'),
+              subtitle: const Text(
+                'Online, the map streams from Protomaps (protomaps.com) wherever you have no downloaded map, '
+                'with your saved areas outlined. Saved areas always come from this device.',
+              ),
+              value: settings.streamWorld,
+              // Offline mode streams nothing, whatever this says.
+              onChanged: settings.offlineMode ? null : (value) => settings.streamWorld = value,
+            ),
             ListTile(
               leading: Icon(
                 settings.updateNotices == UpdateNoticeFrequency.never

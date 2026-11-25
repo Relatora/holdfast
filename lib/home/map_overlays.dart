@@ -356,11 +356,19 @@ class RegionStatusChip extends StatelessWidget {
     required this.region,
     required this.offline,
     this.updates = const [],
+    this.streaming = false,
+    this.centerRegion,
     this.onTap,
   });
 
   final Region? region;
   final bool offline;
+
+  /// The world map is streaming beyond the downloaded maps. The chip then
+  /// follows the centre of the map: [centerRegion] is the downloaded region
+  /// there, or null when the centre is only streamed.
+  final bool streaming;
+  final Region? centerRegion;
 
   /// Maps on this device with a newer build waiting (not necessarily the
   /// one on screen). Said on the chip, which opens My maps, where the
@@ -373,12 +381,19 @@ class RegionStatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final r = region;
+    if (r == null && streaming && updates.isEmpty) {
+      return _Capsule(icon: Icons.cloud_outlined, text: 'Streaming: no map saved offline yet', onTap: onTap);
+    }
     if (r == null) return _Capsule(icon: Icons.map_outlined, text: 'No map yet', onTap: onTap);
     // The update leads: long names are cut off at the end. It names the map
     // that has the update, which may not be the one on screen.
     final (icon, text) = switch (updates) {
       [final only] => (Icons.update_rounded, 'Map update ready: ${only.name}'),
       [_, _, ...] => (Icons.update_rounded, '${updates.length} map updates ready'),
+      _ when streaming => switch (centerRegion) {
+          final here? => (Icons.offline_pin_rounded, 'Offline map: ${here.name}'),
+          null => (Icons.cloud_outlined, 'Streaming: not saved offline'),
+        },
       _ when offline => (Icons.offline_pin_rounded, 'Offline map: ${r.name}'),
       _ => (Icons.public_rounded, 'Streaming: ${r.name}'),
     };

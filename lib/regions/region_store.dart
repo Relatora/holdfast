@@ -151,6 +151,11 @@ class RegionStore extends ChangeNotifier {
   /// Largest region the server builds on demand; null when it doesn't.
   int? prepareMaxBytes;
 
+  /// The newest Protomaps planet build, as the server last reported it.
+  /// Online, the map streams the world from it. Builds are deleted within
+  /// days, so the catalog's own URL for the world soon stops working.
+  String? planetUrl;
+
   /// How often to ask the server how a preparation is going.
   @visibleForTesting
   static Duration pollInterval = const Duration(seconds: 1);
@@ -227,6 +232,7 @@ class RegionStore extends ChangeNotifier {
       // Older servers send neither key: no on-demand preparation.
       final prepare = (body['prepare'] as Map?)?.cast<String, Object?>();
       prepareMaxBytes = prepare?['enabled'] == true ? (prepare!['maxBytes'] as num?)?.toInt() : null;
+      planetUrl = body['planet'] as String?;
       serverReachable = true;
       // Maps downloaded before the app tracked builds have no record. Take
       // them to be the build the server has now: the alternative, offering
@@ -279,6 +285,21 @@ class RegionStore extends ChangeNotifier {
   Region? get activeRegion => byId(_activeId);
 
   bool isHosted(Region region) => region.remoteUrl != null || _hostedBytes.containsKey(region.id);
+
+  /// Where to stream the planet build from, or null when the server named
+  /// none. Phones and desktops read it straight from Protomaps' CDN.
+  /// Browsers can't (Protomaps sends no CORS headers), so the web app reads
+  /// it through the server's proxy, which passes on small range requests.
+  String? get streamUrl {
+    final planet = planetUrl;
+    if (planet == null) return null;
+    return files.storesOffline ? planet : '${Config.regionsUrl}/planet.pmtiles';
+  }
+
+  /// Where a region that streams from its own source (the whole world)
+  /// really is: the server's current planet build when it named one.
+  String? remoteUrlOf(Region region) =>
+      region.remoteUrl == null ? null : (region.level == RegionLevel.world ? streamUrl : null) ?? region.remoteUrl;
 
   /// The real size if the server reported it, else the catalog estimate.
   int sizeOf(Region region) => _hostedBytes[region.id] ?? region.approxBytes;
@@ -366,7 +387,7 @@ class RegionStore extends ChangeNotifier {
     if (files.storesOffline && await files.isDownloaded(region.id)) {
       return files.basemapSource(region.id);
     }
-    return region.remoteUrl ?? '${Config.regionsUrl}/${region.id}.pmtiles';
+    return remoteUrlOf(region) ?? '${Config.regionsUrl}/${region.id}.pmtiles';
   }
 
   /// The region's POI pack, from disk or (on the web) from the server.
@@ -440,7 +461,7 @@ class RegionStore extends ChangeNotifier {
     try {
       await files.download(
         regionId: region.id,
-        basemap: Uri.parse(region.remoteUrl ?? '${Config.regionsUrl}/${region.id}.pmtiles'),
+        basemap: Uri.parse(remoteUrlOf(region) ?? '${Config.regionsUrl}/${region.id}.pmtiles'),
         pois: (_hostedPois[region.id] ?? false)
             ? Uri.parse('${Config.regionsUrl}/${region.id}.pois.json')
             : null,

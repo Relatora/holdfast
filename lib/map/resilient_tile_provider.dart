@@ -46,6 +46,91 @@ class PmTilesTileArchive implements TileArchive {
   }
 }
 
+/// Several archives read as one: the downloaded maps first, in order, then
+/// (online) the streamed planet build for whatever they don't cover.
+///
+/// This is what lets an online map show the whole world while every tile
+/// inside a downloaded region still comes from the device: a tile reaches
+/// the network only when no local archive has it.
+///
+/// The stream is opened on first use, not up front, so an unreachable
+/// server never delays or breaks the local maps. If opening it fails, the
+/// layer treats the streamed area as empty and tries again after
+/// [remoteRetry].
+class LayeredTileArchive implements TileArchive {
+  LayeredTileArchive(
+    this._local, {
+    Future<TileArchive> Function()? openRemote,
+    this.remoteMaxZoom = 15,
+    this.remoteRetry = const Duration(seconds: 30),
+    DateTime Function()? clock,
+  })  : // A named parameter can't be private, so it can't set the field.
+        // ignore: prefer_initializing_formals
+        _openRemote = openRemote,
+        _clock = clock ?? DateTime.now;
+
+  /// Opens [local] (paths or URLs) now and [remote] when first needed.
+  static Future<TileArchive> open(List<String> local, {String? remote}) async => LayeredTileArchive(
+        [for (final source in local) await PmTilesTileArchive.open(source)],
+        openRemote: remote == null ? null : () => PmTilesTileArchive.open(remote),
+      );
+
+  final List<TileArchive> _local;
+  final Future<TileArchive> Function()? _openRemote;
+
+  /// The streamed build's top zoom, known before it is opened. Protomaps
+  /// planet builds go to z15.
+  final int remoteMaxZoom;
+  final Duration remoteRetry;
+  final DateTime Function() _clock;
+
+  Future<TileArchive>? _remote;
+  DateTime? _remoteFailedAt;
+
+  @override
+  int get minZoom => _local.isEmpty ? 0 : _local.map((a) => a.minZoom).reduce((a, b) => a < b ? a : b);
+
+  /// The lowest top zoom of all layers. Past it the map layer over-zooms,
+  /// so inside a downloaded region the camera never asks for a zoom only
+  /// the stream has, which would send local areas to the network.
+  @override
+  int get maxZoom => [
+        for (final a in _local) a.maxZoom,
+        if (_openRemote != null) remoteMaxZoom,
+      ].fold(remoteMaxZoom, (a, b) => a < b ? a : b);
+
+  @override
+  Future<List<int>> tileBytes(int z, int x, int y) async {
+    for (final archive in _local) {
+      try {
+        return await archive.tileBytes(z, x, y);
+      } on MissingTileException {
+        continue; // not in this region; try the next
+      }
+    }
+    final remote = await _remoteArchive();
+    if (remote == null) throw const MissingTileException();
+    return remote.tileBytes(z, x, y);
+  }
+
+  Future<TileArchive?> _remoteArchive() async {
+    final open = _openRemote;
+    if (open == null) return null;
+    if (_remote == null) {
+      final failedAt = _remoteFailedAt;
+      if (failedAt != null && _clock().difference(failedAt) < remoteRetry) return null;
+      _remote = open();
+    }
+    try {
+      return await _remote;
+    } catch (_) {
+      _remote = null;
+      _remoteFailedAt = _clock();
+      return null;
+    }
+  }
+}
+
 /// A tile provider that recovers from failed archive reads.
 ///
 /// Why this exists: the `pmtiles` package caches directory reads as futures
