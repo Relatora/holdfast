@@ -108,10 +108,15 @@ class SystemNotifications implements Notifications {
             channelDescription: kind.channelDescription,
             styleInformation: BigTextStyleInformation(body),
           ),
-          macOS: const DarwinNotificationDetails(),
+          // Desktop notices are silent (#76). Nothing Holdfast posts is
+          // urgent: a newer map can wait until morning, and the default
+          // chime woke someone at night. The toast still lands in the
+          // notification centre. Android keeps its per-channel sound, which
+          // people can change in the system settings for each kind.
+          macOS: const DarwinNotificationDetails(presentSound: false),
           iOS: const DarwinNotificationDetails(),
-          linux: const LinuxNotificationDetails(),
-          windows: const WindowsNotificationDetails(),
+          linux: const LinuxNotificationDetails(suppressSound: true),
+          windows: WindowsNotificationDetails(audio: WindowsNotificationAudio.silent()),
         ),
       );
     } catch (error) {
