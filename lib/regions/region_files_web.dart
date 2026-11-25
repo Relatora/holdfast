@@ -16,6 +16,7 @@ class PlatformRegionFiles implements RegionFiles {
     Map<SidePack, Uri> packs = const {},
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
+    bool restart = false,
   }) async {
     // "Downloading" on the web just means "start streaming this region".
     onProgress(1, 1);

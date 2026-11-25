@@ -27,6 +27,12 @@ class _Bundle extends CachingAssetBundle {
 class _FakeFiles implements RegionFiles {
   final downloaded = <String>[];
 
+  /// The `restart` flag of every download, in order.
+  final restarts = <bool>[];
+
+  /// When set, the next download throws this instead of finishing.
+  Object? failNext;
+
   @override
   bool get storesOffline => true;
 
@@ -38,9 +44,16 @@ class _FakeFiles implements RegionFiles {
     Map<SidePack, Uri> packs = const {},
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
+    bool restart = false,
   }) async {
-    onProgress(1, 1);
-    downloaded.add(regionId);
+    restarts.add(restart);
+    onProgress(1, 2);
+    if (failNext case final error?) {
+      failNext = null;
+      throw error;
+    }
+    onProgress(2, 2);
+    if (!downloaded.contains(regionId)) downloaded.add(regionId);
   }
 
   @override
@@ -67,6 +80,10 @@ class _FakeFiles implements RegionFiles {
 class _FakeServer {
   final hosted = <String, int>{'ottawa': 21294091};
 
+  /// Build times sent in index.json; regions without one are sent without
+  /// (like a server older than 0.4).
+  final builtAt = <String, DateTime>{};
+
   /// Hosted regions whose supply list is missing.
   final mapOnly = <String>{};
   final requests = <String>[];
@@ -82,6 +99,7 @@ class _FakeServer {
             for (final e in hosted.entries)
               e.key: {
                 'pmtilesBytes': e.value,
+                if (builtAt[e.key] case final built?) 'builtAt': built.toIso8601String(),
                 if (!mapOnly.contains(e.key)) ...{'poisBytes': 1000, 'routingBytes': 1000, 'populationBytes': 100},
               },
           },
@@ -191,6 +209,97 @@ void main() {
     expect(store.search('SARN').map((r) => r.id), ['sarnia']);
     expect(store.search('ontario').map((r) => r.id), ['ontario', 'ottawa', 'sarnia']);
     expect(store.search('  '), isEmpty);
+  });
+
+  group('updates', () {
+    final october = DateTime.utc(2026, 10, 1);
+    final november = DateTime.utc(2026, 11, 20);
+
+    Future<void> serverRebuildsOttawa() async {
+      server.builtAt['ottawa'] = november;
+      await store.refreshHosted();
+    }
+
+    setUp(() async {
+      server.builtAt['ottawa'] = october;
+      await store.refreshHosted();
+    });
+
+    test('a newer server build is offered as an update, and applying it reloads the map', () async {
+      final ottawa = store.byId('ottawa')!;
+      await store.download(ottawa);
+      expect(store.builtAt(ottawa), october);
+      expect(store.updateAvailable(ottawa), isFalse);
+      final keyBefore = store.dataKey(ottawa);
+
+      await serverRebuildsOttawa();
+      expect(store.updateAvailable(ottawa), isTrue);
+      expect(store.updatable, [ottawa]);
+
+      final phases = <RegionPhase>[];
+      store.addListener(() => phases.add(store.stateOf(ottawa).phase));
+      await store.updateAll();
+
+      expect(phases, contains(RegionPhase.updating));
+      expect(phases, isNot(contains(RegionPhase.downloading)), reason: 'an update never hides the map');
+      expect(store.stateOf(ottawa).phase, RegionPhase.ready);
+      expect(store.builtAt(ottawa), november);
+      expect(store.updateAvailable(ottawa), isFalse);
+      expect(store.dataKey(ottawa), isNot(keyBefore), reason: 'caches must load the new files');
+    });
+
+    test('a failed update keeps the old map and says why', () async {
+      final ottawa = store.byId('ottawa')!;
+      await store.download(ottawa);
+      await serverRebuildsOttawa();
+
+      files.failNext = StateError('connection reset');
+      await store.update(ottawa);
+
+      expect(store.stateOf(ottawa).phase, RegionPhase.ready);
+      expect(store.updateError(ottawa), contains('connection reset'));
+      expect(store.updateAvailable(ottawa), isTrue, reason: 'still offered, to try again');
+      expect(store.builtAt(ottawa), october);
+    });
+
+    test('a partial download of an older build starts over instead of resuming', () async {
+      final ottawa = store.byId('ottawa')!;
+      files.failNext = const DownloadCancelledException();
+      await store.download(ottawa); // stopped part way, against October's build
+      await store.download(ottawa); // same build: resume
+      expect(files.restarts, [false, false]);
+
+      await store.remove(ottawa);
+      files.failNext = const DownloadCancelledException();
+      await store.download(ottawa); // October again, stopped
+      await serverRebuildsOttawa();
+      await store.download(ottawa); // November: the October bytes must go
+      expect(files.restarts.last, isTrue);
+    });
+
+    test('maps downloaded before builds were tracked are taken to be current', () async {
+      SharedPreferences.setMockInitialValues({
+        'readyRegions': ['ottawa'],
+      });
+      files.downloaded.add('ottawa');
+      final upgraded = RegionStore(files: files, client: MockClient((r) async => server.handle(r)));
+      await upgraded.load(bundle: _Bundle());
+      final ottawa = upgraded.byId('ottawa')!;
+      expect(upgraded.updateAvailable(ottawa), isFalse);
+      expect(upgraded.builtAt(ottawa), october);
+
+      server.builtAt['ottawa'] = november;
+      await upgraded.refreshHosted();
+      expect(upgraded.updateAvailable(ottawa), isTrue);
+    });
+
+    test('a server that sends no build times offers no updates', () async {
+      final ottawa = store.byId('ottawa')!;
+      await store.download(ottawa);
+      server.builtAt.clear();
+      await store.refreshHosted();
+      expect(store.updateAvailable(ottawa), isFalse);
+    });
   });
 
   test('On this device lists stored maps with the active one first', () async {

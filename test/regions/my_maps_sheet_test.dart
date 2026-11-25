@@ -35,6 +35,7 @@ class _Files implements RegionFiles {
     Map<SidePack, Uri> packs = const {},
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
+    bool restart = false,
   }) async =>
       stored.add(regionId);
   @override

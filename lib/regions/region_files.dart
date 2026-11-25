@@ -64,7 +64,15 @@ abstract class RegionFiles {
   /// Downloads a region's basemap and, when the server has them, its POI
   /// pack and side [packs]. [onProgress] receives basemap bytes so far and
   /// the expected total.
-  /// Partial downloads resume where they stopped.
+  ///
+  /// Partial downloads resume where they stopped, unless [restart] is set:
+  /// the caller sets it when the server has rebuilt the region since the
+  /// partial download began, because resuming would splice two different
+  /// builds into one corrupt file.
+  ///
+  /// Everything downloads beside the region's current files and replaces
+  /// them only once all of it has arrived, so updating a map that is on
+  /// screen never leaves it half old, half new.
   Future<void> download({
     required String regionId,
     required Uri basemap,
@@ -72,6 +80,7 @@ abstract class RegionFiles {
     Map<SidePack, Uri> packs = const {},
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
+    bool restart = false,
   });
 
   Future<bool> isDownloaded(String regionId);

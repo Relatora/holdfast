@@ -14,7 +14,7 @@ import 'resilient_tile_provider.dart';
 /// [ResilientTileProvider], which recovers if the archive's cache is poisoned
 /// by a failed read.
 class BasemapLayer extends StatefulWidget {
-  const BasemapLayer({super.key, required this.source, required this.mode});
+  const BasemapLayer({super.key, required this.source, this.revision, required this.mode});
 
   /// The closest the map can zoom. Shared with `MapOptions.maxZoom` so the
   /// basemap is drawn at every zoom the camera can reach (see [build]).
@@ -22,6 +22,11 @@ class BasemapLayer extends StatefulWidget {
 
   /// Path or URL accepted by `PmTilesArchive.from`.
   final String source;
+
+  /// Changes when the file at [source] has been replaced by a newer build.
+  /// The open archive has the old file's directory cached, so the layer
+  /// opens the file afresh.
+  final String? revision;
 
   /// Already resolved (never [AppThemeMode.system]).
   final AppThemeMode mode;
@@ -71,7 +76,7 @@ class _BasemapLayerState extends State<BasemapLayer> {
   @override
   void didUpdateWidget(BasemapLayer old) {
     super.didUpdateWidget(old);
-    if (old.source != widget.source) {
+    if (old.source != widget.source || old.revision != widget.revision) {
       _provider = _open(widget.source);
     }
   }

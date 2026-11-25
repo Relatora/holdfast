@@ -28,6 +28,10 @@ enum RegionPhase {
   /// Stored on this device (or, on the web, selected for streaming).
   ready,
 
+  /// Stored, and a newer build is downloading beside it. The map stays
+  /// usable throughout; the new files replace the old ones at the end.
+  updating,
+
   failed,
 }
 
@@ -60,6 +64,11 @@ enum UnavailableReason { serverUnreachable, tooBig, notHosted }
 /// Getting a region the server doesn't host yet is two steps that look like
 /// one to the user: ask the server to prepare it (following its progress),
 /// then download it as usual. See [download].
+///
+/// Downloaded maps age. The server rebuilds hosted regions from fresh
+/// OpenStreetMap data and reports each one's `builtAt`; the store remembers
+/// which build every map on this device came from and offers an update when
+/// the server's is newer ([updateAvailable], [update]).
 class RegionStore extends ChangeNotifier {
   RegionStore({RegionFiles? files, http.Client? client})
       : files = files ?? RegionFiles(),
@@ -71,11 +80,34 @@ class RegionStore extends ChangeNotifier {
   static const _kReady = 'readyRegions';
   static const _kActive = 'activeRegion';
 
+  /// The server build each downloaded map came from: {id: ISO time}.
+  static const _kBuiltAt = 'regionBuiltAt';
+
+  /// The server build a partial download belongs to: {id: ISO time}.
+  static const _kPartOf = 'regionPartBuiltAt';
+
   List<Region> regions = const [];
   final Map<String, int> _hostedBytes = {};
   final Map<String, bool> _hostedPois = {};
   /// Side packs the server hosts, per region id.
   final Map<String, Set<SidePack>> _hostedPacks = {};
+
+  /// When the server last built each region it hosts.
+  final Map<String, DateTime> _hostedBuiltAt = {};
+
+  /// Which server build each map on this device is.
+  Map<String, DateTime> _builtAt = {};
+
+  /// Which server build each partial download belongs to.
+  Map<String, DateTime> _partOf = {};
+
+  /// Counts the updates applied to each region in this session. Anything
+  /// that caches a region's data keys it by [dataKey], which includes this,
+  /// so an update makes the caches load the new files.
+  final Map<String, int> _revisions = {};
+
+  /// Why the last update of a region failed. The old map is still there.
+  final Map<String, String> _updateErrors = {};
   final Map<String, RegionState> _states = {};
   final Map<String, DownloadCancel> _cancels = {};
 
@@ -117,6 +149,8 @@ class RegionStore extends ChangeNotifier {
         if (!await files.isDownloaded(id)) _ready.remove(id);
       }
     }
+    _builtAt = _readTimes(prefs, _kBuiltAt);
+    _partOf = _readTimes(prefs, _kPartOf);
     _activeId = prefs.getString(_kActive);
     if (_activeId != null && !_ready.contains(_activeId)) _activeId = null;
     _activeId ??= _ready.isEmpty ? null : _ready.first;
@@ -138,9 +172,14 @@ class RegionStore extends ChangeNotifier {
       _hostedBytes.clear();
       _hostedPois.clear();
       _hostedPacks.clear();
+      _hostedBuiltAt.clear();
       index.forEach((id, value) {
         final entry = (value as Map).cast<String, Object?>();
         _hostedBytes[id as String] = (entry['pmtilesBytes']! as num).toInt();
+        // Servers before 0.4 don't send it: no updates are offered.
+        if (DateTime.tryParse(entry['builtAt'] as String? ?? '') case final built?) {
+          _hostedBuiltAt[id] = built;
+        }
         _hostedPois[id] = entry['poisBytes'] != null;
         _hostedPacks[id] = {
           for (final pack in SidePack.values)
@@ -151,6 +190,18 @@ class RegionStore extends ChangeNotifier {
       final prepare = (body['prepare'] as Map?)?.cast<String, Object?>();
       prepareMaxBytes = prepare?['enabled'] == true ? (prepare!['maxBytes'] as num?)?.toInt() : null;
       serverReachable = true;
+      // Maps downloaded before the app tracked builds have no record. Take
+      // them to be the build the server has now: the alternative, offering
+      // every old map as an update at once, would ask for gigabytes on the
+      // strength of a guess. The next real rebuild is then offered as usual.
+      var adopted = false;
+      for (final id in _ready) {
+        if (!_builtAt.containsKey(id) && _hostedBuiltAt[id] != null) {
+          _builtAt[id] = _hostedBuiltAt[id]!;
+          adopted = true;
+        }
+      }
+      if (adopted) await _persist();
       // Pick up work started before the app last closed, so its progress
       // shows instead of a plain download button.
       final jobs = (body['jobs'] as Map?)?.cast<String, Object?>() ?? const {};
@@ -196,6 +247,32 @@ class RegionStore extends ChangeNotifier {
 
   /// True when [sizeOf] is an estimate rather than the server's number.
   bool isEstimate(Region region) => !_hostedBytes.containsKey(region.id);
+
+  /// True when the server has a newer build of a map stored on this device.
+  /// Never on the web, which streams the server's current files anyway.
+  bool updateAvailable(Region region) {
+    if (!files.storesOffline || !_ready.contains(region.id)) return false;
+    final hosted = _hostedBuiltAt[region.id];
+    final local = _builtAt[region.id];
+    return hosted != null && local != null && hosted.isAfter(local);
+  }
+
+  /// Maps on this device with an update waiting, in [deviceRegions] order.
+  List<Region> get updatable => [
+        for (final region in deviceRegions)
+          if (updateAvailable(region) && stateOf(region).phase == RegionPhase.ready) region,
+      ];
+
+  /// When the copy of [region] on this device was built by the server, if
+  /// known.
+  DateTime? builtAt(Region region) => _builtAt[region.id];
+
+  /// Why the last update of [region] failed, if it did.
+  String? updateError(Region region) => _updateErrors[region.id];
+
+  /// Changes whenever [region]'s files on this device are replaced. Use it
+  /// (not the id) as the key for anything decoded from them.
+  String dataKey(Region region) => '${region.id}#${_revisions[region.id] ?? 0}';
 
   RegionState stateOf(Region region) {
     final explicit = _states[region.id];
@@ -291,13 +368,28 @@ class RegionStore extends ChangeNotifier {
   /// doesn't host it yet.
   Future<void> download(Region region) async {
     final phase = stateOf(region).phase;
-    if (phase == RegionPhase.downloading || phase == RegionPhase.preparing) return;
-    if (!isHosted(region) || _missingSupplies(region)) {
+    if (phase case RegionPhase.downloading || RegionPhase.preparing || RegionPhase.updating) return;
+    // Downloading a map that is already here is an update: it keeps working
+    // (and showing as ready) while the new build arrives beside it.
+    final updating = _ready.contains(region.id);
+    if (!updating && (!isHosted(region) || _missingSupplies(region))) {
       final prepared = await _prepare(region);
       if (!prepared) return;
     }
+    final downloadingPhase = updating ? RegionPhase.updating : RegionPhase.downloading;
+    _updateErrors.remove(region.id);
+
+    // A partial download of an older build can't be continued: its bytes
+    // and the new build's would make one corrupt file.
+    final build = _hostedBuiltAt[region.id];
+    final restart = build != null && _partOf[region.id] != null && _partOf[region.id] != build;
+    if (build != null) {
+      _partOf[region.id] = build;
+      await _persist();
+    }
+
     final cancel = _cancels[region.id] = DownloadCancel();
-    _states[region.id] = RegionState(RegionPhase.downloading, total: sizeOf(region));
+    _states[region.id] = RegionState(downloadingPhase, total: sizeOf(region));
     notifyListeners();
     try {
       await files.download(
@@ -311,19 +403,30 @@ class RegionStore extends ChangeNotifier {
             pack: Uri.parse('${Config.regionsUrl}/${pack.fileName(region.id)}'),
         },
         cancel: cancel,
+        restart: restart,
         onProgress: (received, total) {
-          _states[region.id] = RegionState(RegionPhase.downloading, received: received, total: total);
+          _states[region.id] = RegionState(downloadingPhase, received: received, total: total);
           notifyListeners();
         },
       );
       _states.remove(region.id);
       _ready.add(region.id);
       _activeId ??= region.id; // the first map becomes the active one
+      _partOf.remove(region.id);
+      if (build != null) _builtAt[region.id] = build;
+      if (updating) _revisions[region.id] = (_revisions[region.id] ?? 0) + 1;
       await _persist();
     } on DownloadCancelledException {
       _states.remove(region.id);
     } catch (error) {
-      _states[region.id] = RegionState(RegionPhase.failed, error: '$error');
+      if (updating) {
+        // The old map is untouched: keep it usable and say why the update
+        // didn't happen.
+        _states.remove(region.id);
+        _updateErrors[region.id] = '$error';
+      } else {
+        _states[region.id] = RegionState(RegionPhase.failed, error: '$error');
+      }
     } finally {
       _cancels.remove(region.id);
       notifyListeners();
@@ -397,12 +500,26 @@ class RegionStore extends ChangeNotifier {
     }
   }
 
+  /// Replaces [region]'s files with the server's newer build.
+  Future<void> update(Region region) => download(region);
+
+  /// Updates every map in [updatable], one after another: they share one
+  /// connection, so running them side by side would only slow each down.
+  Future<void> updateAll() async {
+    for (final region in updatable) {
+      await update(region);
+    }
+  }
+
   void cancelDownload(Region region) => _cancels[region.id]?.cancel();
 
   Future<void> remove(Region region) async {
     await files.delete(region.id);
     _ready.remove(region.id);
     _states.remove(region.id);
+    _builtAt.remove(region.id);
+    _partOf.remove(region.id);
+    _updateErrors.remove(region.id);
     if (_activeId == region.id) _activeId = _ready.isEmpty ? null : _ready.first;
     await _persist();
     notifyListeners();
@@ -415,9 +532,25 @@ class RegionStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  static Map<String, DateTime> _readTimes(SharedPreferences prefs, String key) {
+    try {
+      final raw = jsonDecode(prefs.getString(key) ?? '{}') as Map<String, Object?>;
+      return {
+        for (final MapEntry(:key, :value) in raw.entries) key: ?DateTime.tryParse(value as String? ?? ''),
+      };
+    } on FormatException {
+      return {};
+    }
+  }
+
+  static String _writeTimes(Map<String, DateTime> times) =>
+      jsonEncode({for (final MapEntry(:key, :value) in times.entries) key: value.toUtc().toIso8601String()});
+
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_kReady, _ready.toList());
+    await prefs.setString(_kBuiltAt, _writeTimes(_builtAt));
+    await prefs.setString(_kPartOf, _writeTimes(_partOf));
     if (_activeId == null) {
       await prefs.remove(_kActive);
     } else {

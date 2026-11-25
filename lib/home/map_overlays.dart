@@ -349,10 +349,20 @@ class SyncStatusChip extends StatelessWidget {
 }
 
 class RegionStatusChip extends StatelessWidget {
-  const RegionStatusChip({super.key, required this.region, required this.offline, this.onTap});
+  const RegionStatusChip({
+    super.key,
+    required this.region,
+    required this.offline,
+    this.updateAvailable = false,
+    this.onTap,
+  });
 
   final Region? region;
   final bool offline;
+
+  /// A newer build of a map on this device is waiting: said on the chip,
+  /// which opens My maps, where the Update button is.
+  final bool updateAvailable;
 
   /// Opens the "My maps" switcher.
   final VoidCallback? onTap;
@@ -362,8 +372,17 @@ class RegionStatusChip extends StatelessWidget {
     final r = region;
     if (r == null) return _Capsule(icon: Icons.map_outlined, text: 'No map yet', onTap: onTap);
     return _Capsule(
-      icon: offline ? Icons.offline_pin_rounded : Icons.public_rounded,
-      text: offline ? 'Offline map: ${r.name}' : 'Streaming: ${r.name}',
+      icon: updateAvailable
+          ? Icons.update_rounded
+          : offline
+              ? Icons.offline_pin_rounded
+              : Icons.public_rounded,
+      // The update leads: long region names are cut off at the end.
+      text: updateAvailable
+          ? 'Map update ready: ${r.name}'
+          : offline
+              ? 'Offline map: ${r.name}'
+              : 'Streaming: ${r.name}',
       onTap: onTap,
     );
   }
