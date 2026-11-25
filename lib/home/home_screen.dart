@@ -23,6 +23,7 @@ import '../map/hazard_marker.dart';
 import '../map/poi_marker.dart';
 import '../map/radar_sweep.dart';
 import '../map/topo_background.dart';
+import '../notify/notifications.dart';
 import '../onboarding/onboarding_carousel.dart';
 import '../onboarding/onboarding_gate.dart';
 import '../pois/poi.dart';
@@ -365,6 +366,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (thanks == null || !mounted) return;
     final tier = Tier.of(_hazardRepo.myRecord);
     final people = thanks.confirmations == 1 ? 'Someone' : '${thanks.confirmations} people';
+    // In front, the snackbar below says it; otherwise the system does.
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      context.read<Notifications?>()?.show(
+            NoticeKind.thanks,
+            title: '$people confirmed your ${thanks.hazard.type.label.toLowerCase()} report',
+            body: 'Thank you for reporting. Your reports now count ${thanks.multiplier.toStringAsFixed(1)}×.',
+          );
+    }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       duration: const Duration(seconds: 6),
       content: Row(
@@ -656,7 +665,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         RegionStatusChip(
                           region: active,
                           offline: regions.files.storesOffline,
-                          updateAvailable: regions.updatable.isNotEmpty,
+                          updates: regions.updatable,
                           onTap: _openMyMaps,
                         ),
                         const SizedBox(height: 6),

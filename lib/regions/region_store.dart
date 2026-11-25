@@ -305,6 +305,11 @@ class RegionStore extends ChangeNotifier {
   /// known.
   DateTime? builtAt(Region region) => _builtAt[region.id];
 
+  /// Names the newer build waiting for [region], so a notification about it
+  /// goes out once: `<id>@<server build time>`. Null when none is waiting.
+  String? updateKey(Region region) =>
+      updateAvailable(region) ? '${region.id}@${_hostedBuiltAt[region.id]!.toUtc().toIso8601String()}' : null;
+
   /// Why the last update of [region] failed, if it did.
   String? updateError(Region region) => _updateErrors[region.id];
 

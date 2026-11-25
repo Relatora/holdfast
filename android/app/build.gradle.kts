@@ -6,12 +6,18 @@ plugins {
 
 android {
     namespace = "dev.holdfast.holdfast"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_local_notifications and androidx.core 1.19 compile against
+    // API 37. Only the APIs the build can see change; targetSdk (runtime
+    // behaviour) and minSdk (supported devices) stay Flutter's defaults.
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // flutter_local_notifications uses java.time, which older Android
+        // versions only have through desugaring.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -46,4 +52,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

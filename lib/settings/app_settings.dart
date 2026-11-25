@@ -36,6 +36,10 @@ class AppSettings extends ChangeNotifier {
   static const _kNuclearView = 'nuclearView';
   static const _kFetchWind = 'fetchWind';
   static const _kOfflineMode = 'offlineMode';
+  static const _kUpdateNotices = 'updateNotices';
+  static const _kAnnouncedUpdates = 'announcedUpdates';
+  static const _kLastUpdateNotice = 'lastUpdateNotice';
+  static const _kNotificationPermissionAsked = 'notificationPermissionAsked';
   static const _kTrainingStars = 'trainingStars';
   static const _kCelebrated = 'celebratedAchievements';
   static const _kDeviceId = 'deviceId';
@@ -92,8 +96,6 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Whether "Use current wind" may ask Open-Meteo for the wind at a
-  /// hazard. Only the hazard's coordinates are sent.
   /// Offline mode: like airplane mode, for this app only. The app uses no
   /// network at all while it is on (see `NetworkGate`).
   bool get offlineMode => _prefs.getBool(_kOfflineMode) ?? false;
@@ -102,6 +104,38 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// How often to be told about newer maps: see [UpdateNoticeFrequency].
+  UpdateNoticeFrequency get updateNotices =>
+      UpdateNoticeFrequency.values.asNameMap()[_prefs.getString(_kUpdateNotices)] ?? UpdateNoticeFrequency.everyUpdate;
+  set updateNotices(UpdateNoticeFrequency value) {
+    _prefs.setString(_kUpdateNotices, value.name);
+    notifyListeners();
+  }
+
+  /// Map builds already announced, as `RegionStore.updateKey`s, so each
+  /// is announced once.
+  Set<String> get announcedUpdates => (_prefs.getStringList(_kAnnouncedUpdates) ?? const []).toSet();
+
+  /// When the last map update notification went out.
+  DateTime? get lastUpdateNotice => DateTime.tryParse(_prefs.getString(_kLastUpdateNotice) ?? '');
+
+  /// Records an update notification for [keys] at [at]. [keep] is every
+  /// build still waiting; announced builds no longer waiting (updated,
+  /// deleted or superseded) are forgotten, so the list stays short.
+  void recordUpdateNotice(Iterable<String> keys, DateTime at, {required Set<String> keep}) {
+    final announced = {...announcedUpdates.where(keep.contains), ...keys};
+    _prefs.setStringList(_kAnnouncedUpdates, announced.toList());
+    _prefs.setString(_kLastUpdateNotice, at.toUtc().toIso8601String());
+  }
+
+  /// Whether the app has asked for notification permission yet. It asks
+  /// once by itself (after the first map download); after that only when
+  /// the user changes the notification setting.
+  bool get notificationPermissionAsked => _prefs.getBool(_kNotificationPermissionAsked) ?? false;
+  set notificationPermissionAsked(bool value) => _prefs.setBool(_kNotificationPermissionAsked, value);
+
+  /// Whether "Use current wind" may ask Open-Meteo for the wind at a
+  /// hazard. Only the hazard's coordinates are sent.
   bool get fetchWind => _prefs.getBool(_kFetchWind) ?? true;
   set fetchWind(bool value) {
     _prefs.setBool(_kFetchWind, value);
@@ -146,4 +180,19 @@ enum NuclearView {
 
   const NuclearView(this.label);
   final String label;
+}
+
+/// How often to be told that newer maps are ready.
+enum UpdateNoticeFrequency {
+  everyUpdate('Every update', 'As soon as a newer map is ready.', null),
+  daily('Daily summary', 'At most once a day, covering everything new.', Duration(days: 1)),
+  weekly('Weekly summary', 'At most once a week, covering everything new.', Duration(days: 7)),
+  never('Never', 'Newer maps still show in Maps and My maps.', null);
+
+  const UpdateNoticeFrequency(this.label, this.description, this.minGap);
+  final String label;
+  final String description;
+
+  /// The least time between two notifications; null when unlimited.
+  final Duration? minGap;
 }
