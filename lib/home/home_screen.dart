@@ -32,6 +32,7 @@ import '../reputation/achievements.dart';
 import '../reputation/my_reporting_screen.dart';
 import '../map/airport_impact_layer.dart';
 import '../map/basemap_layer.dart';
+import '../map/effects/effects_layer.dart';
 import '../map/hazard_marker.dart';
 import '../map/location_layer.dart';
 import '../map/poi_marker.dart';
@@ -972,6 +973,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     spreadLayer([for (final h in hazards) h.hazard, ?preview]),
                     nuclearRingsLayer([for (final h in hazards) h.hazard, ?preview], settings.nuclearView),
                     ...zoneLayers([for (final h in hazards) h.hazard, ?preview]),
+                    // The motion on top: wind, drifting motes, waves, the vent.
+                    // Left out entirely when motion is off or nothing moves.
+                    if (animate)
+                      if ([for (final h in hazards) h.hazard, ?preview].where(hasEffects).toList() case final moving
+                          when moving.isNotEmpty)
+                        EffectsLayer(
+                          hazards: moving,
+                          nightVision: nightVision,
+                          dark: Theme.of(context).brightness == Brightness.dark,
+                        ),
                     if (_directions.plan case final plan?) ...routeLayers(plan, scheme),
                     MarkerLayer(
                       markers: [

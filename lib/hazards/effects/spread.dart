@@ -122,3 +122,23 @@ List<({LatLng center, double radius})> plumeCircles(Hazard hazard, {int hours = 
   }
   return circles;
 }
+
+/// The axis of a hazard's [hours] band, for animating along it: where it
+/// starts, which way it runs, how wide it is at the source and how fast it
+/// widens. Null when the hazard doesn't drift, has no wind, or the air is
+/// calm (no direction to animate).
+({LatLng origin, double towardDegrees, double sourceMeters, double lengthMeters, double widening})? plumeAxis(
+  Hazard hazard, {
+  int hours = 6,
+}) {
+  final wind = hazard.wind;
+  final shape = _plumeShape(hazard);
+  if (wind == null || shape == null || wind.speedKmh < _calmKmh) return null;
+  return (
+    origin: LatLng(hazard.latitude, hazard.longitude),
+    towardDegrees: wind.towardDegrees,
+    sourceMeters: shape.sourceMeters,
+    lengthMeters: math.min(wind.speedKmh * 1000 * hours, shape.maxMeters),
+    widening: math.tan(_spreadDegrees * math.pi / 180),
+  );
+}
