@@ -173,6 +173,35 @@ class NuclearDetails {
   }
 }
 
+/// Where a report's facts come from when it isn't a first-hand sighting:
+/// an official advisory, a news report. Shown with a link so people can
+/// read the original. A source is a citation, not a verification: sourced
+/// reports are confirmed or cleared by people nearby like any other.
+class ReportSource {
+  const ReportSource({required this.name, required this.url});
+
+  /// Who published it: "U.S. Army".
+  final String name;
+
+  /// Only web links are kept: anything else (a `file:` or `intent:` link
+  /// from a malicious report) is dropped before it reaches a button.
+  final Uri url;
+
+  /// The site, for a glance at who is talking: "army.mil".
+  String get site => url.host.startsWith('www.') ? url.host.substring(4) : url.host;
+
+  Map<String, Object?> toJson() => {'name': name, 'url': url.toString()};
+
+  static ReportSource? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final name = raw['name'], link = raw['url'];
+    if (name is! String || name.trim().isEmpty || link is! String) return null;
+    final url = Uri.tryParse(link);
+    if (url == null || !(url.isScheme('https') || url.isScheme('http')) || url.host.isEmpty) return null;
+    return ReportSource(name: name.trim(), url: url);
+  }
+}
+
 /// Typed access to a hazard's details.
 extension HazardDetailsX on Hazard {
   Wind? get wind => Wind.fromJson(details['wind']);
@@ -188,6 +217,7 @@ extension HazardDetailsX on Hazard {
   bool plannedAt(DateTime now) => startsAt?.isAfter(now) ?? false;
   RadiationDetails? get radiation => RadiationDetails.fromJson(details['radiation']);
   NuclearDetails? get nuclear => NuclearDetails.fromJson(details['nuclear']);
+  ReportSource? get source => ReportSource.fromJson(details['source']);
 }
 
 /// Builds the details map for a new report.
@@ -196,10 +226,12 @@ Map<String, Object?> hazardDetails({
   RadiationDetails? radiation,
   NuclearDetails? nuclear,
   DateTime? startsAt,
+  ReportSource? source,
 }) =>
     {
       if (wind != null) 'wind': wind.toJson(),
       if (startsAt != null) 'startsAt': startsAt.toUtc().toIso8601String(),
       if (radiation != null) 'radiation': radiation.toJson(),
       if (nuclear != null) 'nuclear': nuclear.toJson(),
+      if (source != null) 'source': source.toJson(),
     };
