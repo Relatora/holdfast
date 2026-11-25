@@ -178,8 +178,51 @@ class _DeviceList extends StatelessWidget {
             style: theme.textTheme.bodyMedium,
           ),
         ),
+        // One map with an update has its own Update button; the card is
+        // for updating several at once.
+        if (store.updatable case final updates when updates.length > 1) _UpdateAllCard(updates: updates),
         for (final region in regions) _RegionTile(region: region, showLevel: true),
       ],
+    );
+  }
+}
+
+/// One tap to update every map that has a newer build.
+class _UpdateAllCard extends StatelessWidget {
+  const _UpdateAllCard({required this.updates});
+
+  final List<Region> updates;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.read<RegionStore>();
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final bytes = updates.fold<int>(0, (sum, r) => sum + store.sizeOf(r));
+    return Card(
+      margin: const EdgeInsets.fromLTRB(0, 0, 0, 10),
+      color: scheme.tertiaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        child: Row(
+          children: [
+            Icon(Icons.update_rounded, color: scheme.onTertiaryContainer),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Newer data for ${updates.length} of your maps (${formatBytes(bytes)}). '
+                'Each keeps working while it updates.',
+                style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onTertiaryContainer),
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: store.updateAll,
+              child: const Text('Update all'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -307,9 +350,12 @@ class _RegionTile extends StatelessWidget {
     final size = '${store.isEstimate(region) ? '≈ ' : ''}${formatBytes(store.sizeOf(region))}';
     final where = [if (showLevel) region.level.singular, ?parent?.name].join(' in ');
 
+    final update = store.updateAvailable(region);
     final subtitle = switch (state.phase) {
       RegionPhase.downloading =>
         '${formatBytes(state.received)} of ${formatBytes(state.total)}',
+      RegionPhase.updating =>
+        'Updating: ${formatBytes(state.received)} of ${formatBytes(state.total)}. The map works meanwhile.',
       RegionPhase.preparing => switch (state.step) {
           'queued' => 'Waiting for the server to finish another map…',
           'supplies' => 'Server is building the supply list…',
@@ -321,7 +367,15 @@ class _RegionTile extends StatelessWidget {
           UnavailableReason.serverUnreachable => '$size · server unreachable',
           _ => '$size · not on this server',
         },
-      RegionPhase.ready => isActive ? 'Showing on the map' : '$size · ready',
+      RegionPhase.ready => [
+          isActive ? 'Showing on the map' : '$size · ready',
+          if (store.updateError(region) case final error?)
+            'Update failed: $error'
+          else if (update)
+            'Newer map available (${formatBytes(store.sizeOf(region))})'
+          else if (store.builtAt(region) case final built?)
+            'Map from ${formatDate(built)}',
+        ].join(' · '),
       RegionPhase.available || RegionPhase.preparable => [
           if (where.isNotEmpty) where,
           size,
@@ -330,14 +384,16 @@ class _RegionTile extends StatelessWidget {
     };
 
     final Widget trailing = switch (state.phase) {
-      RegionPhase.downloading || RegionPhase.preparing => _ProgressRing(
+      RegionPhase.downloading || RegionPhase.preparing || RegionPhase.updating => _ProgressRing(
           progress: state.progress,
           onCancel: () => store.cancelDownload(region),
         ),
       RegionPhase.ready => Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (!isActive)
+            if (update)
+              TextButton(onPressed: () => store.update(region), child: const Text('Update'))
+            else if (!isActive)
               TextButton(onPressed: () => store.activate(region), child: const Text('Show')),
             IconButton(
               tooltip: 'Delete from this device',
@@ -371,7 +427,7 @@ class _RegionTile extends StatelessWidget {
           RegionPhase.failed => () => _startDownload(context, store),
           // A downloaded map: switch to it and go back to the map, which
           // flies there (the screen returns the region to the home screen).
-          RegionPhase.ready => () async {
+          RegionPhase.ready || RegionPhase.updating => () async {
               await store.activate(region);
               if (context.mounted) Navigator.of(context).pop(region);
             },

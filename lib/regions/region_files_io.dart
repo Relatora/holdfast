@@ -41,7 +41,14 @@ class PlatformRegionFiles implements RegionFiles {
     Map<SidePack, Uri> packs = const {},
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
+    bool restart = false,
   }) async {
+    // Every file lands as "<name>.part" first. Only when all of them have
+    // arrived are they renamed into place, so an update of the map on
+    // screen swaps old for new in one step, and a cancelled or failed
+    // update leaves the old map whole.
+    final staged = <File>[];
+
     // The side packs are small, so fetch them first; then the basemap
     // reports progress for the part that actually takes time.
     for (final (url, name) in [
@@ -49,26 +56,32 @@ class PlatformRegionFiles implements RegionFiles {
       for (final MapEntry(key: pack, value: url) in packs.entries) (url, pack.fileName(regionId)),
     ]) {
       if (url == null) continue;
+      if (cancel.isCancelled) throw const DownloadCancelledException();
       final response = await http.get(url);
       if (response.statusCode == 200) {
-        await (await _file(name)).writeAsBytes(response.bodyBytes);
+        final part = File('${(await _file(name)).path}.part');
+        await part.writeAsBytes(response.bodyBytes, flush: true);
+        staged.add(part);
       }
     }
-    await _resumableDownload(
-      basemap,
-      await _file('$regionId.pmtiles'),
-      onProgress,
-      cancel,
-    );
+
+    final basemapPart = File('${(await _file('$regionId.pmtiles')).path}.part');
+    if (restart && await basemapPart.exists()) await basemapPart.delete();
+    await _resumableDownload(basemap, basemapPart, onProgress, cancel);
+    staged.add(basemapPart);
+
+    for (final part in staged) {
+      await replaceFile(part, File(part.path.substring(0, part.path.length - '.part'.length)));
+    }
   }
 
+  /// Downloads [url] into [part], continuing from whatever is already there.
   Future<void> _resumableDownload(
     Uri url,
-    File target,
+    File part,
     void Function(int received, int total) onProgress,
     DownloadCancel cancel,
   ) async {
-    final part = File('${target.path}.part');
     var received = await part.exists() ? await part.length() : 0;
 
     final client = http.Client();
@@ -102,8 +115,6 @@ class PlatformRegionFiles implements RegionFiles {
         await sink.close();
       }
       onProgress(received, total);
-      if (await target.exists()) await target.delete();
-      await part.rename(target.path);
     } on http.ClientException {
       if (cancel.isCancelled) throw const DownloadCancelledException();
       rethrow;
@@ -136,19 +147,37 @@ class PlatformRegionFiles implements RegionFiles {
     final file = await _file(pack.fileName(regionId));
     final part = File('${file.path}.part');
     await part.writeAsBytes(bytes, flush: true);
-    await part.rename(file.path);
+    await replaceFile(part, file);
   }
 
   @override
   Future<void> delete(String regionId) async {
     for (final name in [
       '$regionId.pmtiles',
-      '$regionId.pmtiles.part',
       '$regionId.pois.json',
       for (final pack in SidePack.values) pack.fileName(regionId),
-    ]) {
+    ].expand((name) => [name, '$name.part'])) {
       final file = await _file(name);
       if (await file.exists()) await file.delete();
+    }
+  }
+}
+
+/// Renames [part] over [target].
+///
+/// On Windows a file can't be replaced while something is reading it, and
+/// the map reads its archive a tile at a time (opening and closing the
+/// file for each read). So a swap that collides with a read is retried a
+/// few times; the reads are short, and the next one finds the new file.
+Future<void> replaceFile(File part, File target) async {
+  for (var attempt = 1;; attempt++) {
+    try {
+      if (await target.exists()) await target.delete();
+      await part.rename(target.path);
+      return;
+    } on FileSystemException {
+      if (attempt >= 10) rethrow;
+      await Future<void>.delayed(Duration(milliseconds: 50 * attempt));
     }
   }
 }

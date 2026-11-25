@@ -35,7 +35,10 @@ class _MyMapsSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<RegionStore>();
     final theme = Theme.of(context);
-    final maps = [for (final r in store.deviceRegions) if (store.stateOf(r).phase == RegionPhase.ready) r];
+    final maps = [
+      for (final r in store.deviceRegions)
+        if (store.stateOf(r).phase case RegionPhase.ready || RegionPhase.updating) r,
+    ];
     return SafeArea(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.7),
@@ -68,6 +71,10 @@ class _MyMapsSheet extends StatelessWidget {
                       subtitle: Text([
                         if (store.activeRegion?.id == region.id) 'On the map now',
                         formatBytes(store.sizeOf(region)),
+                        if (store.stateOf(region).phase == RegionPhase.updating)
+                          'updating'
+                        else if (store.updateAvailable(region))
+                          'newer map available',
                       ].join(' · ')),
                       trailing: const Icon(Icons.near_me_rounded),
                       onTap: () => Navigator.pop(context, GoToMap(region)),
@@ -77,10 +84,21 @@ class _MyMapsSheet extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-              child: TextButton.icon(
-                onPressed: () => Navigator.pop(context, const ManageMaps()),
-                icon: const Icon(Icons.layers_rounded),
-                label: const Text('Download or manage maps'),
+              child: Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: () => Navigator.pop(context, const ManageMaps()),
+                    icon: const Icon(Icons.layers_rounded),
+                    label: const Text('Download or manage maps'),
+                  ),
+                  const Spacer(),
+                  if (store.updatable case final updates when updates.isNotEmpty)
+                    FilledButton.tonalIcon(
+                      onPressed: store.updateAll,
+                      icon: const Icon(Icons.update_rounded),
+                      label: Text(updates.length == 1 ? 'Update' : 'Update all (${updates.length})'),
+                    ),
+                ],
               ),
             ),
           ],

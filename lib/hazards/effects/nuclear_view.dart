@@ -82,7 +82,8 @@ class NuclearEffectsPanel extends StatelessWidget {
   Future<PopulationGrid?> _grid(RegionStore store) {
     final region = store.activeRegion;
     if (region == null) return Future.value(null);
-    return _grids.putIfAbsent(region.id, () async {
+    // Keyed by data key, so an updated map's population grid is read anew.
+    return _grids.putIfAbsent(store.dataKey(region), () async {
       final bytes = await store.sidePack(region, SidePack.population);
       if (bytes == null) return null;
       try {

@@ -98,3 +98,12 @@ String formatBytes(int bytes) {
   final digits = value >= 10 || unit == 0 ? 0 : 1;
   return '${value.toStringAsFixed(digits)} ${units[unit]}';
 }
+
+/// A map build's date in the reader's local time: "20 Nov 2026". Spelled
+/// out rather than numeric, since 11/12 reads as a different day in
+/// different countries.
+String formatDate(DateTime time) {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  final local = time.toLocal();
+  return '${local.day} ${months[local.month - 1]} ${local.year}';
+}

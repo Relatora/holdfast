@@ -16,6 +16,7 @@ class PlatformRegionFiles implements RegionFiles {
     Map<SidePack, Uri> packs = const {},
     required void Function(int received, int total) onProgress,
     required DownloadCancel cancel,
+    bool restart = false,
   }) =>
       throw UnsupportedError('No storage on this platform');
 

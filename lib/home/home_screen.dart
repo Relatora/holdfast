@@ -62,7 +62,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   /// Supply locations of the active region.
   PoiIndex _pois = PoiIndex.empty;
-  String? _poisRegionId;
+
+  /// [RegionStore.dataKey] of the region whose data is loaded: it changes
+  /// when the active map switches *or* is updated, and either way the
+  /// basemap and places are read again.
+  String? _loadedKey;
   String? _basemapSource;
 
   final Set<PoiCategory> _categories = {};
@@ -124,8 +128,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _onRegionsChanged() {
     final active = _regions.activeRegion;
-    if (active?.id == _poisRegionId) return;
-    _poisRegionId = active?.id;
+    final key = active == null ? null : _regions.dataKey(active);
+    if (key == _loadedKey) return;
+    final sameRegion = active != null && _loadedKey?.startsWith('${active.id}#') == true;
+    _loadedKey = key;
     if (active == null) {
       setState(() {
         _pois = PoiIndex.empty;
@@ -134,18 +140,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       });
       return;
     }
-    _loadRegion(active);
+    _loadRegion(active, key: key!, moveCamera: !sameRegion);
   }
 
-  Future<void> _loadRegion(Region region) async {
+  /// Loads [region]'s basemap and places. After an update of the map on
+  /// screen ([moveCamera] false) the view stays where it is.
+  Future<void> _loadRegion(Region region, {required String key, bool moveCamera = true}) async {
     final source = await _regions.basemapSource(region);
     final raw = await _regions.poisJson(region);
-    if (!mounted || _poisRegionId != region.id) return;
+    if (!mounted || _loadedKey != key) return;
     final firstRegion = _basemapSource == null;
     setState(() {
       _basemapSource = source;
       _pois = raw == null ? PoiIndex.empty : PoiIndex.fromPack(jsonDecode(raw) as Map<String, Object?>);
     });
+    if (!moveCamera) {
+      _updateVisiblePois();
+      return;
+    }
     // Fly between regions, but jump straight to the first one: flying in from
     // the zoomed-out world view requests (and cancels) tiles at every zoom on
     // the way, a burst that's all cost and no information.
@@ -395,7 +407,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _openDirections(LatLng to, String label, {LatLng? viewCenter}) {
     final region = _regions.activeRegion;
     if (region == null) return;
-    _directions.open(to: to, label: label, regionId: region.id, avoid: _avoidNow(), viewCenter: viewCenter);
+    _directions.open(
+      to: to,
+      label: label,
+      // The data key, not the id: after an update the new routing pack loads.
+      regionId: _regions.dataKey(region),
+      avoid: _avoidNow(),
+      viewCenter: viewCenter,
+    );
   }
 
   void _onHazardsChanged() => _directions.updateAvoid(_avoidNow());
@@ -496,7 +515,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               if (_basemapSource == null)
                 TopoBackground(animate: animate)
               else
-                BasemapLayer(source: _basemapSource!, mode: mode),
+                BasemapLayer(source: _basemapSource!, revision: _loadedKey, mode: mode),
               spreadLayer([for (final h in hazards) h.hazard]),
               nuclearRingsLayer([for (final h in hazards) h.hazard], settings.nuclearView),
               if (_directions.plan case final plan?) ...routeLayers(plan, scheme),
@@ -637,6 +656,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         RegionStatusChip(
                           region: active,
                           offline: regions.files.storesOffline,
+                          updateAvailable: regions.updatable.isNotEmpty,
                           onTap: _openMyMaps,
                         ),
                         const SizedBox(height: 6),
