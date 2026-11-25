@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../contamination/sample_sheet.dart';
 import '../map/hazard_marker.dart';
@@ -725,6 +726,7 @@ class _HazardDetailsSheet extends StatelessWidget {
             const SizedBox(height: 14),
             Text('"${hazard.description}"', style: theme.textTheme.bodyLarge),
           ],
+          if (hazard.source case final source?) _SourceRow(source: source),
           ..._detailRows(hazard, theme),
           if (hazard.nuclear case final nuclear?) NuclearEffectsPanel(hazard: hazard, details: nuclear),
           const SizedBox(height: 16),
@@ -780,6 +782,31 @@ class _HazardDetailsSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Where the report's facts come from, with a link to the original. Opens
+/// in the system browser: the report itself stays readable offline, the
+/// link needs a connection.
+class _SourceRow extends StatelessWidget {
+  const _SourceRow({required this.source});
+  final ReportSource source;
+
+  Future<void> _open(BuildContext context) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final opened = await launchUrl(source.url, mode: LaunchMode.externalApplication).catchError((_) => false);
+    if (!opened) {
+      messenger?.showSnackBar(SnackBar(content: Text("Couldn't open ${source.site}. The link: ${source.url}")));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.article_outlined),
+        title: Text('Source: ${source.name} (${source.site})'),
+        subtitle: const Text('A citation, not a confirmation: people nearby still confirm or clear it.'),
+        trailing: TextButton(onPressed: () => _open(context), child: const Text('Open source')),
+      );
 }
 
 /// Who reported it and how reliable they have been, so people can weigh a

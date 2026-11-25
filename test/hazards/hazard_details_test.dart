@@ -66,6 +66,36 @@ void main() {
     });
   });
 
+  group('source', () {
+    test('a cited source survives sync and shows its site', () {
+      final original = _hazard(
+        HazardType.leadDust,
+        details: hazardDetails(
+          source: ReportSource(name: 'U.S. Army', url: Uri.parse('https://www.army.mil/article/297039/advisory')),
+        ),
+      );
+      final source = Hazard.fromJson(original.toJson()).source!;
+      expect(source.name, 'U.S. Army');
+      expect(source.site, 'army.mil');
+      expect(source.url.path, '/article/297039/advisory');
+    });
+
+    test('only web links are kept: nothing a button could misuse', () {
+      ReportSource? parse(Object? url) => _hazard(HazardType.fire, details: {
+            'source': {'name': 'Someone', 'url': url},
+          }).source;
+      expect(parse('https://example.org/a'), isNotNull);
+      expect(parse('http://example.org/a'), isNotNull);
+      expect(parse('file:///etc/passwd'), isNull);
+      expect(parse('intent://scan/#Intent;scheme=zxing;end'), isNull);
+      expect(parse('javascript:alert(1)'), isNull);
+      expect(parse('not a link'), isNull);
+      expect(parse(42), isNull);
+      expect(_hazard(HazardType.fire, details: {'source': {'url': 'https://example.org'}}).source, isNull,
+          reason: 'a source needs a name');
+    });
+  });
+
   group('radiation levels', () {
     test('a meter reading picks the right level', () {
       expect(RadiationLevel.forReading(0.1), RadiationLevel.normal);
