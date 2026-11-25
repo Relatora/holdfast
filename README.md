@@ -71,6 +71,8 @@ flutter run -d emulator-5554 --dart-define=HOLDFAST_SERVER=http://10.0.2.2:8787
 
 For a production-like backend with PostgreSQL + PostGIS: `docker compose -f server/docker-compose.yml up`.
 
+**Offline positioning by cell towers.** When GPS can't get a fix, Holdfast places the phone using the towers it hears and a per-region tower pack. The server builds these packs from [OpenCelliD](https://opencellid.org) once you set `OPENCELLID_TOKEN` (a free token from opencellid.org); without it, the step is skipped. To build one by hand: `OPENCELLID_TOKEN=... python tool/build_cells.py ottawa`, or `python tool/build_cells.py ottawa --csv 302.csv.gz` from a file you downloaded.
+
 ## Tests
 
 ```sh
@@ -84,4 +86,4 @@ The MVP milestone covers offline maps, supplies, hazards and sync. Next up (see 
 
 ## Data and licences
 
-Code: MIT. Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, ODbL 1.0; the supply packs are derived databases under the same licence. Basemap tiles and styles by [Protomaps](https://protomaps.com). Hazard reports come from users and can be wrong: always follow local authorities.
+Code: MIT. Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, ODbL 1.0; the supply packs are derived databases under the same licence. Basemap tiles and styles by [Protomaps](https://protomaps.com). Cell-tower positions from [OpenCelliD](https://opencellid.org), CC BY-SA 4.0. Hazard reports come from users and can be wrong: always follow local authorities.

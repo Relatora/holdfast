@@ -12,6 +12,7 @@ package main
 //	tool/import_pois.py   pulls the supply locations from Overpass
 //	tool/build_routing.py compiles the road and rail network for directions
 //	tool/build_population.py cuts the GHSL population grid for casualty estimates
+//	tool/build_cells.py cuts OpenCelliD's tower list for offline positioning
 //
 // Jobs run one at a time: each is bandwidth-bound, so running two at once
 // would only make both slower. Every tool writes to "<file>.part" and renames
@@ -106,6 +107,11 @@ type Builder interface {
 	BuildRoutes(ctx context.Context, region CatalogRegion) error
 	// BuildPopulation writes <dir>/<id>.population.bin.
 	BuildPopulation(ctx context.Context, region CatalogRegion) error
+	// BuildsCells is false when no tower source is configured (OpenCelliD
+	// needs a token); the cells step is then skipped, quietly.
+	BuildsCells() bool
+	// BuildCells writes <dir>/<id>.cells.bin.
+	BuildCells(ctx context.Context, region CatalogRegion) error
 }
 
 var (
@@ -272,7 +278,7 @@ func BuiltAt(dir, id string) time.Time {
 
 // regionFiles names every file a region can have, the map first.
 func regionFiles(id string) []string {
-	return []string{id + ".pmtiles", id + ".pois.json", id + ".routing.bin", id + ".population.bin"}
+	return []string{id + ".pmtiles", id + ".pois.json", id + ".routing.bin", id + ".population.bin", id + ".cells.bin"}
 }
 
 // Status reports the job for id. ok is false when there has been no job.
@@ -342,6 +348,13 @@ func wantsPopulation(region CatalogRegion) bool {
 	return region.Level == "city" || region.Level == "province"
 }
 
+// wantsCells: a tower pack for a city or province is tens to a few hundred
+// kilobytes; a country's runs to tens of megabytes, and a phone only ever
+// needs the towers around it.
+func wantsCells(region CatalogRegion) bool {
+	return region.Level == "city" || region.Level == "province"
+}
+
 // complete is true when nothing is left to build. A map whose supply list
 // or routing pack failed earlier (Overpass is a shared, sometimes overloaded
 // service) is not complete, so asking again retries just what is missing.
@@ -349,7 +362,8 @@ func (p *Preparer) complete(region CatalogRegion) bool {
 	return p.exists(region.ID+".pmtiles") &&
 		(!wantsSupplies(region) || p.exists(region.ID+".pois.json")) &&
 		(!wantsRoutes(region) || p.exists(region.ID+".routing.bin")) &&
-		(!wantsPopulation(region) || p.exists(region.ID+".population.bin"))
+		(!wantsPopulation(region) || p.exists(region.ID+".population.bin")) &&
+		(!wantsCells(region) || !p.builder.BuildsCells() || p.exists(region.ID+".cells.bin"))
 }
 
 func (p *Preparer) work(ctx context.Context) {
@@ -415,6 +429,16 @@ func (p *Preparer) run(ctx context.Context, region CatalogRegion) {
 		}
 	}
 
+	// Towers are added and moved all the time, so a refresh rebuilds them.
+	if wantsCells(region) && p.builder.BuildsCells() && stale(region.ID+".cells.bin") {
+		p.update(region.ID, func(j *Job) { j.State, j.Step, j.BytesDone = JobRunning, "cells", j.BytesTotal })
+		log.Printf("prepare %s: building the cell-tower pack", region.ID)
+		if err := p.builder.BuildCells(ctx, region); err != nil {
+			log.Printf("prepare %s: cells failed: %v", region.ID, err)
+			notes = append(notes, "Offline positioning by cell towers is unavailable: "+err.Error())
+		}
+	}
+
 	p.update(region.ID, func(j *Job) {
 		j.State, j.Step, j.BytesDone, j.Note = JobDone, "", j.BytesTotal, strings.Join(notes, " ")
 	})
@@ -432,6 +456,9 @@ type ToolBuilder struct {
 	Python   string // interpreter, e.g. "python"
 	ToolsDir string // the repo's tool/ directory
 	OutDir   string // the regions directory
+	// Cells is true when OPENCELLID_TOKEN is set, which build_cells.py
+	// reads from the environment it inherits.
+	Cells bool
 }
 
 func (b ToolBuilder) BuildMap(ctx context.Context, region CatalogRegion) error {
@@ -448,6 +475,12 @@ func (b ToolBuilder) BuildRoutes(ctx context.Context, region CatalogRegion) erro
 
 func (b ToolBuilder) BuildPopulation(ctx context.Context, region CatalogRegion) error {
 	return b.run(ctx, "build_population.py", region.ID)
+}
+
+func (b ToolBuilder) BuildsCells() bool { return b.Cells }
+
+func (b ToolBuilder) BuildCells(ctx context.Context, region CatalogRegion) error {
+	return b.run(ctx, "build_cells.py", region.ID)
 }
 
 func (b ToolBuilder) run(ctx context.Context, script, id string) error {

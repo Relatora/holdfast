@@ -14,7 +14,9 @@ import 'config.dart';
 import 'favorites/favorites_store.dart';
 import 'hazards/hazard_repository.dart';
 import 'net/network_gate.dart';
+import 'location/cell_pack.dart';
 import 'location/locator.dart';
+import 'location/tower_locator.dart';
 import 'notify/notifications.dart';
 import 'regions/region_files.dart';
 import 'regions/region_store.dart';
@@ -65,6 +67,24 @@ Future<void> main() async {
 
   final notifications = await SystemNotifications.start(onTap: open);
 
+  // Where you are: GPS first; when it can't get a fix, the towers the phone
+  // hears, placed with the downloaded maps' tower packs. Read from the
+  // device only: positioning must never wait on the network.
+  final locator = DeviceLocator()
+    ..addRoughSource(TowerLocator(loadPacks: () async {
+      final packs = <CellPack>[];
+      for (final region in regions.readyRegions) {
+        try {
+          if (await regions.files.readPack(region.id, SidePack.cells) case final bytes?) {
+            packs.add(CellPack.decode(bytes));
+          }
+        } on Object catch (error) {
+          debugPrint('Cell-tower pack for ${region.id} unreadable: $error');
+        }
+      }
+      return packs;
+    }).locate);
+
   // Regions finish loading in the background (the server check can be
   // slow); the home screen shows the map as soon as local state is ready.
   regions.load();
@@ -80,7 +100,7 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: regions),
         ChangeNotifierProvider.value(value: hazards),
         // One locator for the whole app, so the dot survives screen changes.
-        ChangeNotifierProvider(create: (_) => DeviceLocator()),
+        ChangeNotifierProvider.value(value: locator),
         Provider<Notifications>.value(value: notifications),
       ],
       child: HoldfastApp(navigatorKey: navigator),
