@@ -339,6 +339,8 @@ class SyncStatusChip extends StatelessWidget {
       SyncStatus.syncing => (Icons.sync_rounded, 'Syncing reports…', scheme.primary),
       SyncStatus.synced => (Icons.cloud_done_rounded, 'Reports synced', scheme.primary),
       SyncStatus.offline => (Icons.cloud_off_rounded, 'Offline: reports will sync later', scheme.error),
+      // Chosen, not a fault: no alarming colour.
+      SyncStatus.paused => (Icons.airplanemode_active_rounded, 'Offline mode: reports wait on this device', null),
     };
     // Cross-fade between states so the line never flickers.
     return AnimatedSwitcher(

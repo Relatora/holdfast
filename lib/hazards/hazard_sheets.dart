@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../map/hazard_marker.dart';
+import '../net/network_gate.dart';
 import '../reputation/achievement_badge.dart';
 import '../reputation/achievements.dart';
 import '../settings/app_settings.dart';
@@ -66,7 +67,9 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
 
   Future<void> _useCurrentWind() async {
     setState(() => _fetchingWind = true);
-    final wind = await WindService().current(widget.latitude, widget.longitude);
+    final gate = context.read<NetworkGate?>();
+    final wind = await WindService(client: gate == null ? null : GatedClient(gate))
+        .current(widget.latitude, widget.longitude);
     if (!mounted) return;
     setState(() {
       _fetchingWind = false;
@@ -365,7 +368,8 @@ class _ReportHazardSheetState extends State<_ReportHazardSheet> {
         onChanged: (v) => setState(() => _withWind = v),
       ),
       if (_withWind) ...[
-        if (context.watch<AppSettings>().fetchWind)
+        // Hidden in offline mode: the wind can still be set by hand below.
+        if (context.watch<AppSettings>().fetchWind && (context.watch<NetworkGate?>()?.online ?? true))
           Align(
             alignment: Alignment.centerLeft,
             child: OutlinedButton.icon(

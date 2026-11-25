@@ -35,6 +35,7 @@ class AppSettings extends ChangeNotifier {
   static const _kHazardCategories = 'hazardCategories';
   static const _kNuclearView = 'nuclearView';
   static const _kFetchWind = 'fetchWind';
+  static const _kOfflineMode = 'offlineMode';
   static const _kTrainingStars = 'trainingStars';
   static const _kCelebrated = 'celebratedAchievements';
   static const _kDeviceId = 'deviceId';
@@ -93,6 +94,14 @@ class AppSettings extends ChangeNotifier {
 
   /// Whether "Use current wind" may ask Open-Meteo for the wind at a
   /// hazard. Only the hazard's coordinates are sent.
+  /// Offline mode: like airplane mode, for this app only. The app uses no
+  /// network at all while it is on (see `NetworkGate`).
+  bool get offlineMode => _prefs.getBool(_kOfflineMode) ?? false;
+  set offlineMode(bool value) {
+    _prefs.setBool(_kOfflineMode, value);
+    notifyListeners();
+  }
+
   bool get fetchWind => _prefs.getBool(_kFetchWind) ?? true;
   set fetchWind(bool value) {
     _prefs.setBool(_kFetchWind, value);

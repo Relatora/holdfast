@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config.dart';
+import '../net/network_gate.dart';
 import 'region.dart';
 import 'region_files.dart';
 
@@ -51,7 +52,13 @@ class RegionState {
 }
 
 /// Why a region can't be downloaded right now.
-enum UnavailableReason { serverUnreachable, tooBig, notHosted }
+enum UnavailableReason {
+  /// The user turned on offline mode.
+  offlineMode,
+  serverUnreachable,
+  tooBig,
+  notHosted,
+}
 
 /// The catalog of regions, what the server hosts, and what's on this device.
 ///
@@ -70,12 +77,39 @@ enum UnavailableReason { serverUnreachable, tooBig, notHosted }
 /// which build every map on this device came from and offers an update when
 /// the server's is newer ([updateAvailable], [update]).
 class RegionStore extends ChangeNotifier {
-  RegionStore({RegionFiles? files, http.Client? client})
+  RegionStore({RegionFiles? files, http.Client? client, this.network})
       : files = files ?? RegionFiles(),
-        _client = client ?? http.Client();
+        _client = client ?? http.Client() {
+    network?.addListener(_onNetworkChanged);
+  }
 
   final RegionFiles files;
   final http.Client _client;
+
+  /// Offline mode: while it is on, nothing is downloaded, prepared or
+  /// updated, and the server isn't asked what it hosts. Maps already on the
+  /// device are unaffected.
+  final NetworkGate? network;
+
+  bool get offlineMode => network?.online == false;
+
+  /// Back online: find out what changed while the app was offline.
+  void _onNetworkChanged() {
+    if (offlineMode) {
+      for (final cancel in _cancels.values) {
+        cancel.cancel();
+      }
+      notifyListeners();
+    } else {
+      refreshHosted();
+    }
+  }
+
+  @override
+  void dispose() {
+    network?.removeListener(_onNetworkChanged);
+    super.dispose();
+  }
 
   static const _kReady = 'readyRegions';
   static const _kActive = 'activeRegion';
@@ -162,6 +196,10 @@ class RegionStore extends ChangeNotifier {
 
   /// Re-reads the server's `index.json`.
   Future<void> refreshHosted() async {
+    if (offlineMode) {
+      notifyListeners();
+      return;
+    }
     try {
       final response = await _client
           .get(Uri.parse('${Config.regionsUrl}/index.json'))
@@ -251,7 +289,7 @@ class RegionStore extends ChangeNotifier {
   /// True when the server has a newer build of a map stored on this device.
   /// Never on the web, which streams the server's current files anyway.
   bool updateAvailable(Region region) {
-    if (!files.storesOffline || !_ready.contains(region.id)) return false;
+    if (offlineMode || !files.storesOffline || !_ready.contains(region.id)) return false;
     final hosted = _hostedBuiltAt[region.id];
     final local = _builtAt[region.id];
     return hosted != null && local != null && hosted.isAfter(local);
@@ -278,12 +316,14 @@ class RegionStore extends ChangeNotifier {
     final explicit = _states[region.id];
     if (explicit != null) return explicit;
     if (_ready.contains(region.id)) return const RegionState(RegionPhase.ready);
+    if (offlineMode) return const RegionState(RegionPhase.unavailable);
     if (isHosted(region)) return const RegionState(RegionPhase.available);
     return RegionState(unavailableReason(region) == null ? RegionPhase.preparable : RegionPhase.unavailable);
   }
 
   /// Why [region] can be neither downloaded nor prepared, or null if it can.
   UnavailableReason? unavailableReason(Region region) {
+    if (offlineMode) return UnavailableReason.offlineMode;
     if (isHosted(region)) return null;
     if (!serverReachable) return UnavailableReason.serverUnreachable;
     final max = prepareMaxBytes;
@@ -369,6 +409,7 @@ class RegionStore extends ChangeNotifier {
   Future<void> download(Region region) async {
     final phase = stateOf(region).phase;
     if (phase case RegionPhase.downloading || RegionPhase.preparing || RegionPhase.updating) return;
+    if (offlineMode) return;
     // Downloading a map that is already here is an update: it keeps working
     // (and showing as ready) while the new build arrives beside it.
     final updating = _ready.contains(region.id);

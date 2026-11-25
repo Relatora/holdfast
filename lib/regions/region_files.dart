@@ -8,6 +8,8 @@ library;
 
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
+
 import 'region_files_stub.dart'
     if (dart.library.io) 'region_files_io.dart'
     if (dart.library.js_interop) 'region_files_web.dart' as impl;
@@ -56,7 +58,10 @@ enum SidePack {
 }
 
 abstract class RegionFiles {
-  factory RegionFiles() = impl.PlatformRegionFiles;
+  /// [newClient] makes the HTTP clients downloads use (by default plain
+  /// ones); the app passes gated clients, so offline mode stops downloads
+  /// too.
+  factory RegionFiles({http.Client Function()? newClient}) = impl.PlatformRegionFiles;
 
   /// False on the web, where regions are streamed rather than stored.
   bool get storesOffline;
