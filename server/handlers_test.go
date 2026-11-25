@@ -214,3 +214,47 @@ func TestIndexNamesTheNewestPlanetBuild(t *testing.T) {
 		t.Fatalf("lost the planet URL after a failed refresh: %q", planet.URL())
 	}
 }
+
+func TestPlanetProxyPassesOnlyBoundedRanges(t *testing.T) {
+	var gotRange string
+	build := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRange = r.Header.Get("Range")
+		w.Header().Set("Content-Range", "bytes 0-6/140000000000")
+		w.WriteHeader(http.StatusPartialContent)
+		w.Write([]byte("PMTiles"))
+	}))
+	t.Cleanup(build.Close)
+	planet := &PlanetSource{client: build.Client(), url: build.URL + "/20261124.pmtiles"}
+	ts := httptest.NewServer((&Server{store: NewMemoryStore(), regionsDir: t.TempDir(), planet: planet}).Routes())
+	t.Cleanup(ts.Close)
+
+	get := func(rangeHeader string) *http.Response {
+		req, _ := http.NewRequest("GET", ts.URL+"/regions/planet.pmtiles", nil)
+		if rangeHeader != "" {
+			req.Header.Set("Range", rangeHeader)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	resp := get("bytes=0-6")
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent || string(body) != "PMTiles" || gotRange != "bytes=0-6" {
+		t.Fatalf("proxied range: %d %q (upstream saw %q)", resp.StatusCode, body, gotRange)
+	}
+	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatal("no CORS header: the web app is the reason this exists")
+	}
+
+	for _, bad := range []string{"", "bytes=0-", "bytes=0-99999999999"} {
+		resp := get(bad)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+			t.Errorf("Range %q: status %d, want 416", bad, resp.StatusCode)
+		}
+	}
+}

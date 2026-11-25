@@ -42,6 +42,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /v1/events", s.postEvents)
 	mux.HandleFunc("GET /v1/events", s.getEvents)
 	mux.HandleFunc("GET /regions/index.json", s.regionIndex)
+	// Registered before /regions/{file}, and more specific, so it wins.
+	mux.HandleFunc("GET /regions/planet.pmtiles", s.planetProxy)
 	mux.HandleFunc("GET /regions/{file}", s.regionFile)
 	mux.HandleFunc("POST /regions/{id}/prepare", s.startPrepare)
 	mux.HandleFunc("GET /regions/{id}/prepare", s.prepareStatus)

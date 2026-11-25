@@ -7,6 +7,9 @@ import '../pois/poi.dart';
 ///
 /// [dropDelay] staggers the drop-in so a page of results lands one pin after
 /// another instead of popping in all at once.
+///
+/// A [streamed] place came from the server, not a map on this device: a
+/// small cloud badge says it won't be there with no network.
 class PoiMarker extends StatelessWidget {
   const PoiMarker({
     super.key,
@@ -15,9 +18,11 @@ class PoiMarker extends StatelessWidget {
     this.highlighted = false,
     this.dropDelay = Duration.zero,
     this.nightVision = false,
+    this.streamed = false,
   });
 
   final Poi poi;
+  final bool streamed;
   final bool animate;
   final bool highlighted;
   final Duration dropDelay;
@@ -56,8 +61,33 @@ class PoiMarker extends StatelessWidget {
       ),
     );
 
-    if (!animate) return pin;
-    return pin
+    final Widget marker = streamed
+        ? Stack(
+            clipBehavior: Clip.none,
+            children: [
+              pin,
+              Positioned(
+                right: 0,
+                top: -2,
+                child: Tooltip(
+                  message: 'Streamed: not saved on this device',
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: scheme.surface,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: scheme.outline, width: 1),
+                    ),
+                    child: Icon(Icons.cloud_rounded, size: 11, color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              ),
+            ],
+          )
+        : pin;
+
+    if (!animate) return marker;
+    return marker
         .animate(delay: dropDelay)
         .fadeIn(duration: 180.ms)
         .moveY(begin: -24, end: 0, duration: 420.ms, curve: Curves.bounceOut);

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
@@ -6,26 +7,30 @@ import '../theme/app_theme_mode.dart';
 import 'basemap_style.dart';
 import 'resilient_tile_provider.dart';
 
-/// The vector basemap for one PMTiles source (a local file or a URL),
-/// styled to match the app theme.
+/// The vector basemap, styled to match the app theme: every downloaded map
+/// ([local], the one on screen first) and, online, the streamed planet build
+/// ([remote]) for everywhere they don't cover. See [LayeredTileArchive].
 ///
 /// Opening an archive reads its header and directory, so it's done once per
-/// source and cached; switching themes only swaps the style. Reads go through
-/// [ResilientTileProvider], which recovers if the archive's cache is poisoned
-/// by a failed read.
+/// set of sources and cached; switching themes only swaps the style. Reads go
+/// through [ResilientTileProvider], which recovers if an archive's cache is
+/// poisoned by a failed read.
 class BasemapLayer extends StatefulWidget {
-  const BasemapLayer({super.key, required this.source, this.revision, required this.mode});
+  const BasemapLayer({super.key, required this.local, this.remote, this.revision, required this.mode});
 
   /// The closest the map can zoom. Shared with `MapOptions.maxZoom` so the
   /// basemap is drawn at every zoom the camera can reach (see [build]).
   static const maxMapZoom = 19.0;
 
-  /// Path or URL accepted by `PmTilesArchive.from`.
-  final String source;
+  /// Paths or URLs accepted by `PmTilesArchive.from`, read in this order.
+  final List<String> local;
 
-  /// Changes when the file at [source] has been replaced by a newer build.
-  /// The open archive has the old file's directory cached, so the layer
-  /// opens the file afresh.
+  /// The streamed planet build, or null offline.
+  final String? remote;
+
+  /// Changes when a file in [local] has been replaced by a newer build.
+  /// The open archives have the old files' directories cached, so the layer
+  /// opens them afresh.
   final String? revision;
 
   /// Already resolved (never [AppThemeMode.system]).
@@ -36,10 +41,11 @@ class BasemapLayer extends StatefulWidget {
 }
 
 class _BasemapLayerState extends State<BasemapLayer> {
-  late Future<ResilientTileProvider> _provider = _open(widget.source);
+  late Future<ResilientTileProvider> _provider = _open();
 
-  Future<ResilientTileProvider> _open(String source) async {
-    final provider = await ResilientTileProvider.open(() => PmTilesTileArchive.open(source));
+  Future<ResilientTileProvider> _open() async {
+    final local = widget.local, remote = widget.remote;
+    final provider = await ResilientTileProvider.open(() => LayeredTileArchive.open(local, remote: remote));
     _kickUntilFirstRequest(provider);
     return provider;
   }
@@ -76,8 +82,8 @@ class _BasemapLayerState extends State<BasemapLayer> {
   @override
   void didUpdateWidget(BasemapLayer old) {
     super.didUpdateWidget(old);
-    if (old.source != widget.source || old.revision != widget.revision) {
-      _provider = _open(widget.source);
+    if (!listEquals(old.local, widget.local) || old.remote != widget.remote || old.revision != widget.revision) {
+      _provider = _open();
     }
   }
 

@@ -22,7 +22,9 @@ import '../map/basemap_layer.dart';
 import '../map/hazard_marker.dart';
 import '../map/poi_marker.dart';
 import '../map/radar_sweep.dart';
+import '../map/saved_area_layers.dart';
 import '../map/topo_background.dart';
+import '../net/network_gate.dart';
 import '../notify/notifications.dart';
 import '../onboarding/onboarding_carousel.dart';
 import '../onboarding/onboarding_gate.dart';
@@ -65,13 +67,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   PoiIndex _pois = PoiIndex.empty;
 
   /// [RegionStore.dataKey] of the region whose data is loaded: it changes
-  /// when the active map switches *or* is updated, and either way the
-  /// basemap and places are read again.
+  /// when the active map switches *or* is updated, and either way its
+  /// places are read again.
   String? _loadedKey;
-  String? _basemapSource;
+  bool _shownFirstRegion = false;
+
+  /// Every downloaded map's basemap, the one on screen first, and the data
+  /// keys they were read for. The map draws all of them, so moving past
+  /// the edge of one downloaded region shows the next.
+  List<String> _localSources = const [];
+  String? _sourcesKey;
+
+  /// Place packs of regions other than the active one, loaded as they come
+  /// into view: downloaded ones from the device, and (online, streaming)
+  /// hosted cities from the server, whose pins get a cloud badge.
+  final Map<String, ({Region region, PoiIndex index, bool streamed})> _otherPacks = {};
+  final Set<String> _requestedPacks = {};
+
+  /// Streamed packs are only fetched this close in: a city's places, not a
+  /// continent's worth of requests while flying over it.
+  static const _streamPlacesZoom = 11.0;
+
+  /// The downloaded region under the centre of the map, if any.
+  Region? _centerRegion;
+
+  /// The camera's zoom when the pins were last picked.
+  double _zoom = 3;
 
   final Set<PoiCategory> _categories = {};
   List<Poi> _visiblePois = const [];
+
+  /// Ids in [_visiblePois] that came from the server, not this device.
+  Set<String> _streamedPois = const {};
   String? _highlightedPoi;
 
   /// True for a moment after the pin set changes on purpose (new filter,
@@ -128,15 +155,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ---- Region & data loading -------------------------------------------------
 
   void _onRegionsChanged() {
+    _loadSources();
     final active = _regions.activeRegion;
     final key = active == null ? null : _regions.dataKey(active);
     if (key == _loadedKey) return;
     final sameRegion = active != null && _loadedKey?.startsWith('${active.id}#') == true;
     _loadedKey = key;
+    // The other packs may include the new active region, or an old build.
+    _otherPacks.clear();
+    _requestedPacks.clear();
     if (active == null) {
       setState(() {
         _pois = PoiIndex.empty;
-        _basemapSource = null;
         _visiblePois = const [];
       });
       return;
@@ -144,15 +174,36 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _loadRegion(active, key: key!, moveCamera: !sameRegion);
   }
 
-  /// Loads [region]'s basemap and places. After an update of the map on
-  /// screen ([moveCamera] false) the view stays where it is.
+  /// Maps on this device whose basemap the map can draw.
+  List<Region> get _downloaded => [
+        for (final r in _regions.deviceRegions)
+          if (_regions.stateOf(r).phase case RegionPhase.ready || RegionPhase.updating) r,
+      ];
+
+  /// Opens the basemaps of every downloaded map, the one on screen first, and
+  /// again whenever one is added, removed or updated.
+  Future<void> _loadSources() async {
+    final maps = _downloaded;
+    final key = maps.map(_regions.dataKey).join(',');
+    if (key == _sourcesKey) return;
+    _sourcesKey = key;
+    final sources = [for (final r in maps) await _regions.basemapSource(r)];
+    if (!mounted || _sourcesKey != key) return;
+    setState(() => _localSources = sources);
+  }
+
+  /// Online, with the setting on and a planet build to stream from.
+  bool _streaming(AppSettings settings, NetworkGate? network) =>
+      (network?.online ?? true) && settings.streamWorld && _regions.streamUrl != null;
+
+  /// Loads [region]'s places. After an update of the map on screen
+  /// ([moveCamera] false) the view stays where it is.
   Future<void> _loadRegion(Region region, {required String key, bool moveCamera = true}) async {
-    final source = await _regions.basemapSource(region);
     final raw = await _regions.poisJson(region);
     if (!mounted || _loadedKey != key) return;
-    final firstRegion = _basemapSource == null;
+    final firstRegion = !_shownFirstRegion;
+    _shownFirstRegion = true;
     setState(() {
-      _basemapSource = source;
       _pois = raw == null ? PoiIndex.empty : PoiIndex.fromPack(jsonDecode(raw) as Map<String, Object?>);
     });
     if (!moveCamera) {
@@ -228,19 +279,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // ---- Pins ------------------------------------------------------------------
 
-  /// Picks which supply pins to draw for the current viewport.
+  /// Picks which supply pins to draw for the current viewport, and notes
+  /// which downloaded region the map is centred on.
   void _updateVisiblePois({bool drop = false}) {
-    if (_pois.isEmpty) return;
     final camera = _map.camera;
     final bounds = camera.visibleBounds;
-    final showAll = camera.zoom >= _allPinsZoom;
     final center = camera.center;
-    final candidates = [
-      for (final poi in _pois.pois)
+    _centerRegion = _downloadedRegionAt(center);
+    _zoom = camera.zoom;
+    _loadPacksInView(bounds, camera.zoom);
+
+    final streaming = _streaming(context.read<AppSettings>(), context.read<NetworkGate?>());
+    final showAll = camera.zoom >= _allPinsZoom;
+    final seen = <String>{};
+    final streamed = <String>{};
+    final candidates = <Poi>[];
+    // The active map's places first: where regions overlap (a city inside a
+    // province), the same place is listed once, from the closest match.
+    for (final (index, fromServer) in [
+      (_pois, false),
+      for (final pack in _otherPacks.values)
+        // Streamed places go away with the stream (offline mode).
+        if (_overlaps(pack.region, bounds) && (streaming || !pack.streamed)) (pack.index, pack.streamed),
+    ]) {
+      for (final poi in index.pois) {
         if ((_categories.isEmpty ? showAll : _categories.contains(poi.category)) &&
-            bounds.contains(LatLng(poi.latitude, poi.longitude)))
-          poi,
-    ];
+            bounds.contains(LatLng(poi.latitude, poi.longitude)) &&
+            seen.add(poi.id)) {
+          candidates.add(poi);
+          if (fromServer) streamed.add(poi.id);
+        }
+      }
+    }
     // Closest to the centre first, so the cap trims the edges of the screen.
     candidates.sort(
       (a, b) => distanceMeters(
@@ -252,8 +322,48 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
     setState(() {
       _visiblePois = candidates.take(_maxPins).toList();
+      _streamedPois = streamed;
       if (drop) _startDrop();
     });
+  }
+
+  static bool _overlaps(Region r, LatLngBounds b) =>
+      r.west <= b.east && r.east >= b.west && r.south <= b.north && r.north >= b.south;
+
+  /// The smallest downloaded region containing [point]: in Ottawa, inside
+  /// Ontario, that's Ottawa.
+  Region? _downloadedRegionAt(LatLng point) {
+    Region? best;
+    for (final r in _downloaded) {
+      if (r.contains(point.latitude, point.longitude) && (best == null || r.approxBytes < best.approxBytes)) best = r;
+    }
+    return best;
+  }
+
+  /// Starts loading the place packs of regions in view that aren't loaded:
+  /// other downloaded maps from the device and, when streaming and close
+  /// enough in, hosted cities from the server.
+  void _loadPacksInView(LatLngBounds bounds, double zoom) {
+    final active = _regions.activeRegion?.id;
+    final streaming = _streaming(context.read<AppSettings>(), context.read<NetworkGate?>());
+    final downloaded = {for (final r in _downloaded) r.id};
+    for (final region in _regions.regions) {
+      if (region.id == active || _requestedPacks.contains(region.id) || !_overlaps(region, bounds)) continue;
+      final local = downloaded.contains(region.id);
+      final stream = !local &&
+          streaming &&
+          zoom >= _streamPlacesZoom &&
+          region.level == RegionLevel.city &&
+          _regions.isHosted(region);
+      if (!local && !stream) continue;
+      _requestedPacks.add(region.id);
+      _regions.poisJson(region).then((raw) {
+        if (!mounted || raw == null || !_requestedPacks.contains(region.id)) return;
+        final index = PoiIndex.fromPack(jsonDecode(raw) as Map<String, Object?>);
+        _otherPacks[region.id] = (region: region, index: index, streamed: !local);
+        _updateVisiblePois();
+      });
+    }
   }
 
   void _startDrop() {
@@ -493,6 +603,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final nightVision = mode == AppThemeMode.nightVision;
     final animate = Motion.enabled(context);
     final active = regions.activeRegion;
+    final streaming = _streaming(settings, context.watch<NetworkGate?>());
+    final planet = streaming ? regions.streamUrl : null;
 
     final shownCategories = settings.hazardCategories;
     final hazards = [
@@ -521,10 +633,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               onLongPress: (_, point) => _onLongPress(point),
             ),
             children: [
-              if (_basemapSource == null)
+              if (_localSources.isEmpty && planet == null)
                 TopoBackground(animate: animate)
               else
-                BasemapLayer(source: _basemapSource!, revision: _loadedKey, mode: mode),
+                BasemapLayer(local: _localSources, remote: planet, revision: _sourcesKey, mode: mode),
+              // Streaming blurs where the device's maps end, so draw it.
+              if (streaming) ...savedAreaLayers(_downloaded, scheme, zoom: _zoom),
               spreadLayer([for (final h in hazards) h.hazard]),
               nuclearRingsLayer([for (final h in hazards) h.hazard], settings.nuclearView),
               if (_directions.plan case final plan?) ...routeLayers(plan, scheme),
@@ -545,6 +659,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           highlighted: poi.id == _highlightedPoi,
                           dropDelay: Duration(milliseconds: math.min(i, 30) * 18),
                           nightVision: nightVision,
+                          streamed: _streamedPois.contains(poi.id),
                         ),
                       ),
                     ),
@@ -666,6 +781,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           region: active,
                           offline: regions.files.storesOffline,
                           updates: regions.updatable,
+                          streaming: streaming,
+                          centerRegion: _centerRegion,
                           onTap: _openMyMaps,
                         ),
                         const SizedBox(height: 6),
@@ -702,7 +819,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
             ),
 
-          if (regions.loaded && active == null) Center(child: NoMapCard(onChoose: _openRegions)),
+          // While streaming, the world is on screen already; the Get a map
+          // button below still offers a download.
+          if (regions.loaded && active == null && !streaming) Center(child: NoMapCard(onChoose: _openRegions)),
         ],
       ),
     );
