@@ -25,6 +25,9 @@ import 'routing_graph.dart';
 double avoidRadiusMeters(HazardType type) => switch (type) {
       HazardType.nuclearDetonation => 5000,
       HazardType.volcanicAsh => 2000,
+      // The Army's 2026 Iowa lead azide detonation evacuated a 5-mile
+      // cone downwind; the plume covers that, this covers the site.
+      HazardType.leadDust => 1500,
       HazardType.tsunami => 1500,
       HazardType.radiation => 1000,
       HazardType.fire || HazardType.chemicalSpill || HazardType.lava => 500,

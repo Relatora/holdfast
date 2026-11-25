@@ -176,13 +176,30 @@ class NuclearDetails {
 /// Typed access to a hazard's details.
 extension HazardDetailsX on Hazard {
   Wind? get wind => Wind.fromJson(details['wind']);
+
+  /// When a planned release happens (a controlled detonation, a burn), if
+  /// the report is about one. Ignored when missing or unreadable.
+  DateTime? get startsAt => switch (details['startsAt']) {
+        final String raw => DateTime.tryParse(raw),
+        _ => null,
+      };
+
+  /// True while a planned release is still ahead.
+  bool plannedAt(DateTime now) => startsAt?.isAfter(now) ?? false;
   RadiationDetails? get radiation => RadiationDetails.fromJson(details['radiation']);
   NuclearDetails? get nuclear => NuclearDetails.fromJson(details['nuclear']);
 }
 
 /// Builds the details map for a new report.
-Map<String, Object?> hazardDetails({Wind? wind, RadiationDetails? radiation, NuclearDetails? nuclear}) => {
+Map<String, Object?> hazardDetails({
+  Wind? wind,
+  RadiationDetails? radiation,
+  NuclearDetails? nuclear,
+  DateTime? startsAt,
+}) =>
+    {
       if (wind != null) 'wind': wind.toJson(),
+      if (startsAt != null) 'startsAt': startsAt.toUtc().toIso8601String(),
       if (radiation != null) 'radiation': radiation.toJson(),
       if (nuclear != null) 'nuclear': nuclear.toJson(),
     };
