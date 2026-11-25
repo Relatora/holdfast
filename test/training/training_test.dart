@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:holdfast/contamination/contaminants.dart';
+import 'package:holdfast/contamination/interpolation.dart';
 import 'package:holdfast/hazards/hazard.dart';
 import 'package:holdfast/hazards/hazard_details.dart';
 import 'package:holdfast/pois/poi.dart';
@@ -122,5 +124,47 @@ void main() {
         expect(blast.wind?.fromCompass, 'NW');
       });
     });
+  });
+
+  test('the lead dust release: neighbour readings arrive, and reading and adding them count', () async {
+    SharedPreferences.setMockInitialValues({});
+    var now = DateTime.utc(2026, 11, 25, 15);
+    final lead = TrainingController(
+      scenario: scenarios.firstWhere((s) => s.id == 'leadDustRelease'),
+      center: const LatLng(40.80, -91.26),
+      playerId: 'me',
+      clock: () => now,
+      tick: const Duration(days: 1),
+    );
+    await lead.start();
+    addTearDown(lead.dispose);
+
+    now = now.add(const Duration(seconds: 5));
+    lead.advance();
+    final release = lead.sandbox.hazards.single;
+    expect(release.type, HazardType.leadDust);
+    expect(release.wind!.fromCompass, 'NE', reason: 'it drifts towards the player');
+
+    now = now.add(const Duration(seconds: 40));
+    lead.advance();
+    final readings = lead.sandbox.liveSamples;
+    expect(readings, hasLength(5));
+    expect(readings.map((s) => s.level), contains(ContaminationLevel.dangerous));
+    expect(estimateZones(readings), hasLength(1), reason: 'enough readings for a zone');
+
+    final objectives = lead.scenario.objectives;
+    TrainingHooks.report(const FoundMyLocation());
+    TrainingHooks.report(OpenedSample(readings.first.contaminant));
+    await Future<void>.delayed(Duration.zero);
+    expect(lead.done, containsAll([objectives.indexWhere((o) => o.text.contains('location')), objectives.indexWhere((o) => o.text.contains('soil reading'))]));
+
+    await lead.sandbox.addSample(
+      contaminant: Contaminant.lead,
+      value: 180,
+      method: SampleMethod.kit,
+      latitude: 40.80,
+      longitude: -91.26,
+    );
+    expect(lead.done, contains(objectives.indexWhere((o) => o.text.contains('add a lead reading'))));
   });
 }

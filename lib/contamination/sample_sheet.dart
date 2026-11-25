@@ -7,6 +7,7 @@ import '../hazards/hazard_repository.dart';
 import '../location/locator.dart';
 import '../reputation/achievement_badge.dart';
 import '../reputation/achievements.dart';
+import '../training/training_hooks.dart';
 import 'contaminants.dart';
 import 'sample.dart';
 import 'sample_layer.dart';
@@ -246,7 +247,11 @@ class _LevelCard extends StatelessWidget {
 
 /// A reading's details: what it means, how it was taken, who took it, and
 /// buttons for others to back it up or flag it.
-Future<void> showSampleDetailsSheet(BuildContext context, String sampleId) => showModalBottomSheet<void>(
+Future<void> showSampleDetailsSheet(BuildContext context, String sampleId) {
+  if (context.read<HazardRepository>().sampleById(sampleId) case final sample?) {
+    TrainingHooks.report(OpenedSample(sample.contaminant));
+  }
+  return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -255,6 +260,7 @@ Future<void> showSampleDetailsSheet(BuildContext context, String sampleId) => sh
         child: SingleChildScrollView(child: _SampleDetails(sampleId: sampleId)),
       ),
     );
+}
 
 class _SampleDetails extends StatelessWidget {
   const _SampleDetails({required this.sampleId});

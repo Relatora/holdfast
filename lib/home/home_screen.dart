@@ -454,6 +454,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (_locator.busy) return;
     final fix = await locateMe(context, _locator);
     if (fix == null || !mounted) return;
+    TrainingHooks.report(const FoundMyLocation());
     // A GPS fix: street level. A rough one: wide enough to show its circle
     // (about 16 at 100 m, one zoom level out per doubling).
     final fitZoom = (16 - math.log(math.max(fix.accuracyMeters, 100) / 100) / math.ln2).clamp(9.0, 17.0);

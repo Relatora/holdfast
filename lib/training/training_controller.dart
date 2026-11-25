@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../contamination/contaminants.dart';
+import '../contamination/sample.dart';
 import '../hazards/hazard.dart';
 import '../hazards/hazard_events.dart';
 import '../hazards/hazard_repository.dart';
@@ -99,6 +100,24 @@ class TrainingController extends ChangeNotifier {
               hazardId,
               HazardVote(deviceId: 'neighbour-$_neighbour', kind: event.kind, at: now, distanceMeters: 200),
             ),
+        ]);
+      case ScriptedSample():
+        final at = const Distance().offset(center, event.meters, event.bearing);
+        final neighbour = 'neighbour-${_neighbour++}';
+        final sample = Sample(
+          id: 'training-${scenario.id}-sample-$_neighbour',
+          contaminant: event.contaminant,
+          value: event.value,
+          method: SampleMethod.xrf,
+          latitude: at.latitude,
+          longitude: at.longitude,
+          reportedBy: neighbour,
+          reportedAt: now,
+          depthCm: 2,
+        );
+        sandbox.receive([
+          HazardEvent.sample('${sample.id}-event',
+              sampleId: sample.id, deviceId: neighbour, at: now, payload: sample.toJson()),
         ]);
       case ScriptedNotice():
         break;

@@ -53,6 +53,12 @@ class AddedSample extends TrainingAction {
   final Contaminant contaminant;
 }
 
+/// The player opened a contamination reading.
+class OpenedSample extends TrainingAction {
+  const OpenedSample(this.contaminant);
+  final Contaminant contaminant;
+}
+
 /// The player found their location (any method).
 class FoundMyLocation extends TrainingAction {
   const FoundMyLocation();
