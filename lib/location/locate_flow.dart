@@ -59,6 +59,13 @@ enum _Choice { retry, approximate, openLocationSettings, openAppSettings, close 
 /// which locates them by Wi-Fi.
 bool get _hasCellRadio => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
+/// Windows keeps location for desktop apps behind two switches in
+/// Settings, with no prompt the app can show again.
+bool get _isWindows => !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+const _windowsSwitches = 'In Windows Settings, under Privacy & security > Location, turn on '
+    '"Location services" and "Let desktop apps access your location".';
+
 String get _approximateLabel => _hasCellRadio ? 'Use cell towers' : 'Use approximate location';
 
 Future<_Choice?> _showProblem(BuildContext context, LocateProblem problem) {
@@ -69,8 +76,13 @@ Future<_Choice?> _showProblem(BuildContext context, LocateProblem problem) {
         _hasCellRadio
             ? 'Turn on location to find yourself by GPS. GPS works with no signal and no data. '
                 'Holdfast also needs location on to read nearby cell towers.'
-            : 'Turn on location in this device\'s settings to find yourself on the map.',
-        [(_Choice.openLocationSettings, 'Turn on location'), (_Choice.close, 'Not now')],
+            : _isWindows
+                ? '$_windowsSwitches Windows finds this PC from nearby Wi-Fi networks.'
+                : 'Turn on location in this device\'s settings to find yourself on the map.',
+        [
+          (_Choice.openLocationSettings, _isWindows ? 'Open location settings' : 'Turn on location'),
+          (_Choice.close, 'Not now'),
+        ],
       ),
     LocateProblem.noFix => (
         Icons.gps_not_fixed_rounded,
@@ -91,9 +103,14 @@ Future<_Choice?> _showProblem(BuildContext context, LocateProblem problem) {
     LocateProblem.deniedForever => (
         Icons.location_disabled_rounded,
         'Location is blocked for Holdfast',
-        'You chose not to be asked again. To find yourself on the map, allow location in '
-            'Holdfast\'s app settings.',
-        [(_Choice.openAppSettings, 'Open app settings'), (_Choice.close, 'Not now')],
+        _isWindows
+            ? _windowsSwitches
+            : 'You chose not to be asked again. To find yourself on the map, allow location in '
+                'Holdfast\'s app settings.',
+        [
+          (_Choice.openAppSettings, _isWindows ? 'Open location settings' : 'Open app settings'),
+          (_Choice.close, 'Not now'),
+        ],
       ),
     LocateProblem.unsupported => (
         Icons.not_listed_location_rounded,
